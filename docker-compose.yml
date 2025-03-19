@@ -1,0 +1,42 @@
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5430:5432"
+
+  juno_plugin:
+    volumes:
+      - type: bind
+        source: $HOME/snapshots-test/
+        target: /snapshots
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      VAULT_HASH: ${VAULT_HASH}
+      UDC_ADDRESS: ${UDC_ADDRESS}
+      L1_URL: ${L1_URL}
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      DEPLOYER: ${DEPLOYER}
+      CURSOR: ${CURSOR}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "6060:6060" # Adjust this port if needed
+
+volumes:
+  postgres_data:

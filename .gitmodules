@@ -1,0 +1,3 @@
+[submodule "juno"]
+	path = juno
+	url = git@github.com:NethermindEth/juno.git

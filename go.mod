@@ -1,6 +1,6 @@
 module junoplugin
 
-go 1.23.4
+go 1.24.1
 
 require (
 	github.com/NethermindEth/juno v0.14.0

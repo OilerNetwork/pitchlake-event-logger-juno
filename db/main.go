@@ -59,9 +59,10 @@ func Init(dbUrl string) (*DB, error) {
 }
 
 func (db *DB) Shutdown() {
-	db.Pool.Close()
+
 	db.tx.Rollback(context.Background())
 	db.tx.Conn().Close(context.Background())
+	db.Pool.Close()
 	db.Conn.Close(context.Background())
 }
 
@@ -75,12 +76,10 @@ func (db *DB) BeginTx() {
 
 func (db *DB) CommitTx() {
 	db.tx.Commit(db.ctx)
-	db.tx.Conn().Close(db.ctx)
 	db.tx = nil
 }
 
 func (db *DB) RollbackTx() {
 	db.tx.Rollback(db.ctx)
-	db.tx.Conn().Close(db.ctx)
 	db.tx = nil
 }

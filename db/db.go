@@ -11,7 +11,7 @@ import (
 
 func (db *DB) GetVaultAddresses() ([]*string, error) {
 	var vaultAddresses []*string
-	rows, err := db.Conn.Query(context.Background(), "SELECT address FROM vault_registry")
+	rows, err := db.Pool.Query(context.Background(), "SELECT vault_address FROM vault_registry")
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -86,17 +86,23 @@ func (db *DB) GetLastBlock() (*models.StarknetBlocks, error) {
 	var lastBlock models.StarknetBlocks
 	query := `
 	SELECT * FROM starknet_blocks 
-	WHERE is_reverted = FALSE
+	WHERE STATUS = 'MINED'
 	ORDER BY block_number DESC 
 	LIMIT 1`
 	if db.tx == nil {
-		err := db.Conn.QueryRow(context.Background(), query).Scan(&lastBlock)
+		err := db.Pool.QueryRow(context.Background(), query).Scan(&lastBlock)
 		if err != nil {
+			if err == pgx.ErrNoRows {
+				return nil, nil
+			}
 			return nil, err
 		}
 	} else {
 		err := db.tx.QueryRow(context.Background(), query).Scan(&lastBlock)
 		if err != nil {
+			if err == pgx.ErrNoRows {
+				return nil, nil
+			}
 			return nil, err
 		}
 	}

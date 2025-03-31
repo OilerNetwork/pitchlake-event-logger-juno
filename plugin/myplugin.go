@@ -209,6 +209,18 @@ func (p *pitchlakePlugin) NewBlock(
 			}
 		}
 	}
+	starknetBlock := models.StarknetBlocks{
+		BlockNumber: block.Number,
+		BlockHash:   block.Hash.String(),
+		ParentHash:  block.ParentHash.String(),
+		Status:      "MINED",
+	}
+	err := p.db.InsertBlock(&starknetBlock)
+	if err != nil {
+		p.db.RollbackTx()
+		return err
+	}
+	p.lastBlockDB = &starknetBlock
 	p.db.CommitTx()
 	p.mu.Unlock()
 	return nil

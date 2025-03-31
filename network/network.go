@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"junoplugin/models"
 	"os"
 
 	"github.com/NethermindEth/juno/core/felt"
@@ -24,12 +25,27 @@ func NewNetwork() (*Network, error) {
 	}, nil
 }
 
-func (n *Network) GetEvents(fromBlock uint64, toBlock uint64, address string) (*rpc.EventChunk, error) {
-	addressFelt := new(felt.Felt)
-	addressFelt.SetString(address)
+func (n *Network) GetDeployerEvents(blockNumber uint64) (*rpc.EventChunk, error) {
+	udcAddress := os.Getenv("UDC_ADDRESS")
+	var block rpc.BlockID
+
+	block.Number = &blockNumber
+	events, err := n.GetEvents(block, block, &udcAddress)
+	if err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+func (n *Network) GetEvents(fromBlock rpc.BlockID, toBlock rpc.BlockID, address *string) (*rpc.EventChunk, error) {
+	var addressFelt *felt.Felt
+	if address != nil {
+		addressFelt = new(felt.Felt)
+		addressFelt.SetString(*address)
+	}
 	filter := rpc.EventFilter{
-		FromBlock: rpc.BlockID{Number: &fromBlock},
-		ToBlock:   rpc.BlockID{Number: &toBlock},
+		FromBlock: fromBlock,
+		ToBlock:   toBlock,
 		Address:   addressFelt,
 	}
 	input := rpc.EventsInput{
@@ -42,10 +58,21 @@ func (n *Network) GetEvents(fromBlock uint64, toBlock uint64, address string) (*
 	return events, nil
 }
 
-func (n *Network) GetUDCEventsAt(blockNumber uint64) (*rpc.EventChunk, error) {
-	events, err := n.GetEvents(blockNumber, blockNumber, os.Getenv("UDC_ADDRESS"))
-	if err != nil {
-		return nil, err
+func (n *Network) GetBlocks(fromBlock uint64, toBlock uint64) ([]*models.StarknetBlocks, error) {
+	var blocks []*models.StarknetBlocks
+	for i := fromBlock; i <= toBlock; i++ {
+		block, err := n.provider.BlockWithTxHashes(n.ctx, rpc.BlockID{Number: &i})
+		if err != nil {
+			return nil, err
+		}
+		blockData := block.(map[string]any)
+		starknetBlock := &models.StarknetBlocks{
+			BlockNumber: i,
+			BlockHash:   blockData["block_hash"].(string),
+			ParentHash:  blockData["parent_hash"].(string),
+		}
+		blocks = append(blocks, starknetBlock)
 	}
-	return events, nil
+
+	return blocks, nil
 }

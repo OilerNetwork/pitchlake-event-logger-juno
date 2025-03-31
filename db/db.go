@@ -4,84 +4,103 @@ import (
 	"context"
 	"encoding/json"
 	"junoplugin/models"
-	"junoplugin/utils"
 	"log"
 
-	"github.com/NethermindEth/juno/core"
+	"github.com/jackc/pgx/v5"
 )
 
-func (db *DB) GetVaultAddresses() ([]string, error) {
-	var vaultAddresses []string
-	if err := db.tx.QueryRow(context.Background(), "SELECT address FROM vault_registry").Scan(&vaultAddresses); err != nil {
+func (db *DB) GetVaultAddresses() ([]*string, error) {
+	var vaultAddresses []*string
+	rows, err := db.Conn.Query(context.Background(), "SELECT address FROM vault_registry")
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var address string
+		if err := rows.Scan(&address); err != nil {
+			return nil, err
+		}
+		vaultAddresses = append(vaultAddresses, &address)
+	}
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return vaultAddresses, nil
 }
 
-func (db *DB) InsertVaultRegistry(vault models.VaultRegistry) error {
-	query := `
-	INSERT INTO vault_registry (address, deployed_at, last_block) 
-	VALUES ($1, $2, $3)
-	ON CONFLICT (address) 
-	DO UPDATE SET 
-		deployed_at = $2, 
-		last_block = $3	
-	`
-	_, err := db.tx.Exec(context.Background(), query, vault.Address, vault.DeployedAt, vault.LastBlock)
-	return err
-}
-
-func (db *DB) InsertBlock(coreBlock *core.Block) error {
-	hash := utils.FeltToHexString(coreBlock.Hash.Bytes())
-	parentHash := utils.FeltToHexString(coreBlock.ParentHash.Bytes())
+func (db *DB) InsertBlock(block *models.StarknetBlocks) error {
+	hash := block.BlockHash
+	parentHash := block.ParentHash
 	query := `
 	INSERT INTO starknet_blocks 
 	(block_number, 
 	block_hash, 
 	parent_hash, 
-	status, 
-	is_processed) 
-	VALUES ($1, $2, $3, 'MINED', FALSE)
+	status) 
+	VALUES ($1, $2, $3, 'MINED')
 	`
-	_, err := db.tx.Exec(context.Background(), query, coreBlock.Number, hash, parentHash)
+	_, err := db.tx.Exec(context.Background(), query, block.BlockNumber, hash, parentHash)
 	return err
 }
 
 func (db *DB) RevertBlock(blockNumber uint64, blockHash string) error {
 	query := `	
 	UPDATE starknet_blocks 
-	SET status = 'REVERTED' AND is_processed = FALSE 
+	SET status = 'REVERTED' 	
 	WHERE block_number = $1 and block_hash = $2`
 	_, err := db.tx.Exec(context.Background(), query, blockNumber, blockHash)
 	return err
 }
 
-func (db *DB) GetLastBlockVault(address string) (uint64, error) {
+func (db *DB) GetVaultRegistry(address string) (models.VaultRegistry, error) {
+	var vaultRegistry models.VaultRegistry
+	query := `
+	SELECT * FROM vault_registry 
+	WHERE vault_address = $1`
+	err := db.tx.QueryRow(context.Background(), query, address).Scan(&vaultRegistry)
+	return vaultRegistry, err
+}
+
+func (db *DB) GetBlock(hash string) (models.StarknetBlocks, error) {
+	var block models.StarknetBlocks
+	query := `
+	SELECT * FROM starknet_blocks 
+	WHERE block_hash = $1`
+	err := db.tx.QueryRow(context.Background(), query, hash).Scan(&block)
+	return block, err
+}
+func (db *DB) GetLastIndexedBlockVault(address string) (uint64, error) {
 	var lastBlock uint64
 	query := `
-	SELECT last_block FROM vault_registry 
-	WHERE address = $1`
+	SELECT last_block_indexed FROM vault_registry 
+	WHERE vault_address = $1`
 	err := db.tx.QueryRow(context.Background(), query, address).Scan(&lastBlock)
 	return lastBlock, err
 }
-func (db *DB) GetLastBlock() (uint64, error) {
-	var lastBlock uint64
+func (db *DB) GetLastBlock() (*models.StarknetBlocks, error) {
+	var lastBlock models.StarknetBlocks
 	query := `
-	SELECT block_number FROM starknet_blocks 
+	SELECT * FROM starknet_blocks 
+	WHERE is_reverted = FALSE
 	ORDER BY block_number DESC 
 	LIMIT 1`
 	if db.tx == nil {
 		err := db.Conn.QueryRow(context.Background(), query).Scan(&lastBlock)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 	} else {
 		err := db.tx.QueryRow(context.Background(), query).Scan(&lastBlock)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
-	return lastBlock, nil
+	return &lastBlock, nil
 }
 
 func (db *DB) StoreEvent(txHash, vaultAddress string, blockNumber uint64, eventName string, eventKeys []string, eventData []string) error {

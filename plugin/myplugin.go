@@ -12,6 +12,7 @@ import (
 	"github.com/NethermindEth/juno/core"
 	"github.com/NethermindEth/juno/core/felt"
 	junoplugin "github.com/NethermindEth/juno/plugin"
+	"github.com/NethermindEth/starknet.go/rpc"
 )
 
 // Todo: push this stuff to a config file / cmd line
@@ -31,7 +32,7 @@ type pitchlakePlugin struct {
 	db                *db.DB
 	log               *log.Logger
 	network           *network.Network
-	lastBlockDB       uint64
+	lastBlockDB       *models.StarknetBlocks
 	mu                sync.Mutex
 	channel           chan models.VaultRegistry
 }
@@ -58,8 +59,10 @@ func (p *pitchlakePlugin) Init() error {
 	}
 
 	//Map
-	for _, vaultAddress := range vaultAddresses {
-		p.vaultAddressesMap[vaultAddress] = struct{}{}
+	if vaultAddresses != nil {
+		for _, vaultAddress := range vaultAddresses {
+			p.vaultAddressesMap[*vaultAddress] = struct{}{}
+		}
 	}
 
 	p.vaultHash = os.Getenv("VAULT_HASH")
@@ -78,23 +81,54 @@ func (p *pitchlakePlugin) Init() error {
 
 func (p *pitchlakePlugin) CatchupIndexer(latestBlock uint64) error {
 
-	for vault := range p.vaultAddressesMap {
-		p.CatchupVault(vault, latestBlock)
+	startBlock := p.lastBlockDB.BlockNumber
+	for startBlock < latestBlock {
+		endBlock := startBlock + 1000
+		if endBlock > latestBlock {
+			endBlock = latestBlock
+		}
+		p.db.BeginTx()
+		for vault := range p.vaultAddressesMap {
+			p.CatchupVault(vault, endBlock)
+		}
+		blocks, err := p.network.GetBlocks(startBlock, endBlock)
+		if err != nil {
+			return err
+		}
+		for _, block := range blocks {
+			p.db.InsertBlock(block)
+		}
+		p.db.CommitTx()
+		startBlock = endBlock
 	}
-	return nil
 
+	return nil
 }
 
-func (p *pitchlakePlugin) CatchupVault(address string, latestBlock uint64) error {
-	lastBlock, err := p.db.GetLastBlockVault(address)
+func (p *pitchlakePlugin) CatchupVault(address string, toBlock uint64) error {
+	vaultRegistry, err := p.db.GetVaultRegistry(address)
 	if err != nil {
 		return err
 	}
-	events, err := p.network.GetEvents(lastBlock, latestBlock, address)
-	if err != nil {
-		return err
-	}
+	var fromBlock uint64
 
+	if vaultRegistry.LastBlockIndexed == nil {
+		deploymentBlock, err := p.db.GetBlock(vaultRegistry.DeployedAt)
+		if err != nil {
+			return err
+		}
+		fromBlock = deploymentBlock.BlockNumber
+	} else {
+		lastBlockIndexed, err := p.db.GetBlock(*vaultRegistry.LastBlockIndexed)
+		if err != nil {
+			return err
+		}
+		fromBlock = lastBlockIndexed.BlockNumber + 1
+	}
+	events, err := p.network.GetEvents(rpc.BlockID{Number: &fromBlock}, rpc.BlockID{Number: &toBlock}, &address)
+	if err != nil {
+		return err
+	}
 	for _, event := range events.Events {
 		coreEvent := core.Event{
 			From: event.FromAddress,
@@ -108,11 +142,21 @@ func (p *pitchlakePlugin) CatchupVault(address string, latestBlock uint64) error
 
 func (p *pitchlakePlugin) InitializeVault(vault models.VaultRegistry) error {
 	p.mu.Lock()
-	err := p.db.InsertVaultRegistry(vault)
+
+	hash := felt.Felt{}
+	hash.SetString(vault.DeployedAt)
+	deployBlock := rpc.BlockID{
+		Hash: &hash,
+	}
+	events, err := p.network.GetEvents(deployBlock, deployBlock, nil)
 	if err != nil {
 		return err
 	}
-	err = p.CatchupVault(vault.Address, p.lastBlockDB)
+	err = p.processDeploymentEvents(events, vault)
+	if err != nil {
+		return err
+	}
+	err = p.CatchupVault(vault.Address, p.lastBlockDB.BlockNumber)
 	if err != nil {
 		return err
 	}
@@ -146,7 +190,7 @@ func (p *pitchlakePlugin) NewBlock(
 ) error {
 
 	p.mu.Lock()
-	if p.lastBlockDB != 0 && p.lastBlockDB < block.Number-1 {
+	if p.lastBlockDB != nil && p.lastBlockDB.BlockNumber < block.Number-1 {
 		p.CatchupIndexer(block.Number)
 	}
 
@@ -199,30 +243,34 @@ func (p *pitchlakePlugin) RevertBlock(
 	return nil
 }
 
-func (p *pitchlakePlugin) processUDC(
-	txHash string,
-	events []*core.Event,
-	event *core.Event,
-	index int,
-	blockNumber uint64,
-	timestamp uint64,
+func (p *pitchlakePlugin) processDeploymentEvents(
+	events *rpc.EventChunk,
+	vault models.VaultRegistry,
 ) error {
 
-	eventHash := utils.Keccak256("ContractDeployed")
-	if eventHash == event.Keys[0].String() {
-		address := utils.FeltToHexString(event.Data[0].Bytes())
-		deployer := utils.FeltToHexString(event.Data[1].Bytes())
-		classHash := utils.FeltToHexString(event.Data[3].Bytes())
-		//ClassHash and deployer filter, may use other filters here
+	for index, event := range events.Events {
+		eventNameHash := utils.Keccak256("ContractDeployed")
+		if eventNameHash == event.Keys[0].String() {
+			address := utils.FeltToHexString(event.Data[0].Bytes())
+			if address == vault.Address {
+				txHash := utils.FeltToHexString(event.TransactionHash.Bytes())
 
-		if classHash == p.vaultHash && deployer == p.deployer {
-			eventKeys, eventData := utils.EventToStringArrays(*event)
-			p.db.StoreEvent(txHash, address, blockNumber, "ContractDeployed", eventKeys, eventData)
-			if err := p.processVaultEvent(txHash, address, events[index-1], blockNumber); err != nil {
-				return err
+				eventKeys := utils.FeltArrayToStringArrays(event.Keys)
+				eventData := utils.FeltArrayToStringArrays(event.Data)
+
+				p.db.StoreEvent(txHash, address, event.BlockNumber, "ContractDeployed", eventKeys, eventData)
+
+				//Process the round deployed event
+				junoEvent := core.Event{
+					From: events.Events[index-1].FromAddress,
+					Keys: events.Events[index-1].Keys,
+					Data: events.Events[index-1].Data,
+				}
+				if err := p.processVaultEvent(txHash, address, &junoEvent, event.BlockNumber); err != nil {
+					return err
+				}
 			}
 		}
-
 	}
 	return nil
 }

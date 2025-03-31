@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/NethermindEth/juno/core"
+	"github.com/NethermindEth/juno/core/felt"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -145,4 +146,14 @@ func EventToStringArrays(event core.Event) ([]string, []string) {
 	}
 
 	return keys, data
+}
+
+func FeltArrayToStringArrays(feltArray []*felt.Felt) []string {
+	strArray := make([]string, len(feltArray))
+
+	for i, felt := range feltArray {
+		strArray[i] = felt.String()
+	}
+
+	return strArray
 }

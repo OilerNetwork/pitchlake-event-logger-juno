@@ -31,7 +31,6 @@ services:
       L1_URL: ${L1_URL}
       DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
       DEPLOYER: ${DEPLOYER}
-      CURSOR: ${CURSOR}
     depends_on:
       db:
         condition: service_healthy

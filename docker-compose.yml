@@ -28,7 +28,9 @@ services:
     environment:
       VAULT_HASH: ${VAULT_HASH}
       UDC_ADDRESS: ${UDC_ADDRESS}
+      RPC_URL: ${RPC_URL}
       L1_URL: ${L1_URL}
+      CURSOR: ${CURSOR}
       DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
       DEPLOYER: ${DEPLOYER}
     depends_on:

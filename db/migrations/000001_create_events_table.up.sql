@@ -2,7 +2,7 @@
 
 CREATE TABLE "events"
 (
-    event_count BIGINT NOT NULL,
+    eventIndex BIGINT NOT NULL,
     block_number numeric(78,0) NOT NULL,
     vault_address character varying(255) NOT NULL,
     timestamp numeric(78,0) NOT NULL,

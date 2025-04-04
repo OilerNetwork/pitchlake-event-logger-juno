@@ -58,11 +58,10 @@ type Event struct {
 	EventName       string   `json:"event_name"`
 	EventKeys       []string `json:"event_keys"`
 	EventData       []string `json:"event_data"`
-	EventIndex      int      `json:"event_index"`
+	EventCount      int      `json:"event_count"`
 }
 
 type StarknetBlocks struct {
-	ID          uint   `json:"id"`
 	BlockNumber uint64 `json:"block_number"`
 	Timestamp   uint64 `json:"timestamp"`
 	BlockHash   string `json:"block_hash"`

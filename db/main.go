@@ -59,9 +59,6 @@ func Init(dbUrl string) (*DB, error) {
 }
 
 func (db *DB) Shutdown() {
-
-	db.tx.Rollback(context.Background())
-	db.tx.Conn().Close(context.Background())
 	db.Pool.Close()
 	db.Conn.Close(context.Background())
 }

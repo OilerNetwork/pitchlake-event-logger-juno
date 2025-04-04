@@ -2,6 +2,7 @@ CREATE TABLE "starknet_blocks" (
     block_number numeric(78,0) NOT NULL PRIMARY KEY,
     block_hash character varying(66) NOT NULL,
     parent_hash character varying(66) NOT NULL,
+    timestamp numeric(78,0) NOT NULL,
     status varchar(255) NOT NULL
 );
 

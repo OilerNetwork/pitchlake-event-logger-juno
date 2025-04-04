@@ -9,9 +9,16 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (db *DB) GetVaultAddresses() ([]*string, error) {
-	var vaultAddresses []*string
-	rows, err := db.Pool.Query(context.Background(), "SELECT vault_address FROM vault_registry")
+func (db *DB) GetVaultRegistry() ([]*models.VaultRegistry, error) {
+	var vaultRegistry []*models.VaultRegistry
+	query := `
+	SELECT 
+		vault_address, 
+		deployed_at, 
+		last_block_indexed, 
+		last_block_indexed 
+	FROM vault_registry`
+	rows, err := db.Pool.Query(context.Background(), query)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -21,16 +28,16 @@ func (db *DB) GetVaultAddresses() ([]*string, error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var address string
-		if err := rows.Scan(&address); err != nil {
+		var vault models.VaultRegistry
+		if err := rows.Scan(&vault.Address, &vault.DeployedAt, &vault.LastBlockIndexed, &vault.LastBlockIndexed); err != nil {
 			return nil, err
 		}
-		vaultAddresses = append(vaultAddresses, &address)
+		vaultRegistry = append(vaultRegistry, &vault)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return vaultAddresses, nil
+	return vaultRegistry, nil
 }
 
 func (db *DB) InsertBlock(block *models.StarknetBlocks) error {
@@ -41,10 +48,11 @@ func (db *DB) InsertBlock(block *models.StarknetBlocks) error {
 	(block_number, 
 	block_hash, 
 	parent_hash, 
+	timestamp,
 	status) 
-	VALUES ($1, $2, $3, 'MINED')
+	VALUES ($1, $2, $3, $4, 'MINED')
 	`
-	_, err := db.tx.Exec(context.Background(), query, block.BlockNumber, hash, parentHash)
+	_, err := db.tx.Exec(context.Background(), query, block.BlockNumber, hash, parentHash, block.Timestamp)
 	return err
 }
 
@@ -57,15 +65,34 @@ func (db *DB) RevertBlock(blockNumber uint64, blockHash string) error {
 	return err
 }
 
-func (db *DB) GetVaultRegistry(address string) (models.VaultRegistry, error) {
+func (db *DB) GetVaultRegistryByAddress(address string) (models.VaultRegistry, error) {
 	var vaultRegistry models.VaultRegistry
 	query := `
-	SELECT * FROM vault_registry 
+	SELECT 
+		vault_address, 
+		deployed_at, 
+		last_block_indexed, 
+		last_block_indexed 
+	FROM vault_registry 
 	WHERE vault_address = $1`
-	err := db.tx.QueryRow(context.Background(), query, address).Scan(&vaultRegistry)
+
+	err := db.Conn.QueryRow(context.Background(), query, address).Scan(
+		&vaultRegistry.Address,
+		&vaultRegistry.DeployedAt,
+		&vaultRegistry.LastBlockIndexed,
+		&vaultRegistry.LastBlockIndexed,
+	)
 	return vaultRegistry, err
 }
 
+func (db *DB) GetNextBlock(hash string) (models.StarknetBlocks, error) {
+	var block models.StarknetBlocks
+	query := `
+	SELECT * FROM starknet_blocks 
+	WHERE parent_hash = $1`
+	err := db.tx.QueryRow(context.Background(), query, hash).Scan(&block)
+	return block, err
+}
 func (db *DB) GetBlock(hash string) (models.StarknetBlocks, error) {
 	var block models.StarknetBlocks
 	query := `
@@ -85,12 +112,12 @@ func (db *DB) GetLastIndexedBlockVault(address string) (uint64, error) {
 func (db *DB) GetLastBlock() (*models.StarknetBlocks, error) {
 	var lastBlock models.StarknetBlocks
 	query := `
-	SELECT * FROM starknet_blocks 
+	SELECT block_number, block_hash, parent_hash, timestamp FROM starknet_blocks 
 	WHERE STATUS = 'MINED'
 	ORDER BY block_number DESC 
 	LIMIT 1`
 	if db.tx == nil {
-		err := db.Pool.QueryRow(context.Background(), query).Scan(&lastBlock)
+		err := db.Pool.QueryRow(context.Background(), query).Scan(&lastBlock.BlockNumber, &lastBlock.BlockHash, &lastBlock.ParentHash, &lastBlock.Timestamp)
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return nil, nil
@@ -98,7 +125,7 @@ func (db *DB) GetLastBlock() (*models.StarknetBlocks, error) {
 			return nil, err
 		}
 	} else {
-		err := db.tx.QueryRow(context.Background(), query).Scan(&lastBlock)
+		err := db.tx.QueryRow(context.Background(), query).Scan(&lastBlock.BlockNumber, &lastBlock.BlockHash, &lastBlock.ParentHash, &lastBlock.Timestamp)
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return nil, nil
@@ -110,15 +137,26 @@ func (db *DB) GetLastBlock() (*models.StarknetBlocks, error) {
 }
 
 func (db *DB) StoreEvent(txHash, vaultAddress string, blockNumber uint64, eventName string, eventKeys []string, eventData []string) error {
-
-	query := `	
+	log.Printf("Storing event %s %s %d %s %v %v", txHash, vaultAddress, blockNumber, eventName, eventKeys, eventData)
+	query := `    
 	INSERT INTO events 
-	(transaction_hash, vault_address, block_number, event_name, event_keys, event_data) 
-	VALUES ($1, $2, $3, $4, $5, $6)`
+	(transaction_hash, vault_address, block_number, event_name, event_keys, event_data, event_count) 
+	VALUES ($1, $2::varchar, $3, $4, $5, $6, 
+		(SELECT COALESCE(MAX(event_count), 0) + 1 
+		 FROM events 
+		 WHERE vault_address = $2::varchar))`
 	_, err := db.tx.Exec(context.Background(), query, txHash, vaultAddress, blockNumber, eventName, eventKeys, eventData)
 	return err
 }
 
+func (db *DB) UpdateVaultRegistry(address string, blockHash string) error {
+	query := `
+	UPDATE vault_registry 
+	SET last_block_indexed = $1 
+	WHERE vault_address = $2`
+	_, err := db.tx.Exec(context.Background(), query, blockHash, address)
+	return err
+}
 func (db *DB) ListenerNewVault(channel chan<- models.VaultRegistry) {
 	db.Conn.Exec(context.Background(), "LISTEN new_vault")
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"junoplugin/models"
 	"math/big"
+	"strings"
 
 	"github.com/NethermindEth/juno/core"
 	"github.com/NethermindEth/juno/core/felt"
@@ -36,6 +37,24 @@ func FeltToHexString(felt [32]byte) string {
 	combinedInt := models.BigInt{Int: new(big.Int).SetBytes(felt[:])}
 	// Assuming `f.Value` holds the *big.Int representation of the felt
 	return "0x" + combinedInt.Text(16)
+}
+
+// HexStringToFelt properly converts a hex string to bytes
+func HexStringToFelt(hexStr string) ([]byte, error) {
+	// Remove 0x prefix if present
+	if len(hexStr) >= 2 && hexStr[:2] == "0x" {
+		hexStr = hexStr[2:]
+	}
+
+	// Create a new big.Int from the hex string
+	bigInt := new(big.Int)
+	_, success := bigInt.SetString(hexStr, 16)
+	if !success {
+		return nil, fmt.Errorf("invalid hex string: %s", hexStr)
+	}
+
+	// Return the bytes representation directly
+	return bigInt.Bytes(), nil
 }
 
 func BigIntToHexString(f big.Int) string {
@@ -156,4 +175,28 @@ func FeltArrayToStringArrays(feltArray []*felt.Felt) []string {
 	}
 
 	return strArray
+}
+
+// Func to remove 0 padding after 0x,
+//
+//	Address: 0x50aa16a833664c92d4163b14fed470786fa4411ffd3b3addbb97a70ae56efbd
+//	Vault address: 0x050aa16a833664c92d4163b14fed470786fa4411ffd3b3addbb97a70ae56efbd
+//	These 2 addresses should match
+
+// NormalizeHexAddress removes leading zeros after 0x prefix
+// Example:
+// Input:  "0x050aa16a833664c92d4163b14fed470786fa4411ffd3b3addbb97a70ae56efbd"
+// Output: "0x50aa16a833664c92d4163b14fed470786fa4411ffd3b3addbb97a70ae56efbd"
+func NormalizeHexAddress(hexStr string) (string, error) {
+	if !strings.HasPrefix(hexStr, "0x") {
+		return "", fmt.Errorf("hex string must start with 0x prefix")
+	}
+
+	// Remove 0x and leading zeros, but keep at least one digit
+	trimmed := strings.TrimLeft(hexStr[2:], "0")
+	if trimmed == "" {
+		return "0x0", nil
+	}
+
+	return "0x" + trimmed, nil
 }

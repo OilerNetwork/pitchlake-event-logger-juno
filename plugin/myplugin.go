@@ -139,25 +139,38 @@ func (p *pitchlakePlugin) CatchupVault(address string, toBlock uint64) error {
 	}
 	log.Printf("Vault registry: %v", vaultRegistry)
 
-	var fromBlock rpc.BlockID
+	var fromBlock *rpc.BlockID
+	log.Printf("Vault registry: %v", vaultRegistry.LastBlockIndexed)
 	if vaultRegistry.LastBlockIndexed == nil {
 		err = p.InitializeVault(vaultRegistry)
 		if err != nil {
 			log.Println("Error initializing vault", err)
 			return err
-
 		}
-	} else {
-		nextBlock, err := p.db.GetNextBlock(*vaultRegistry.LastBlockIndexed)
+		deployBlock, err := p.network.GetBlockByHash(vaultRegistry.DeployedAt)
 		if err != nil {
-			log.Println("Error getting block", err)
+			log.Println("Error getting deploy block", err)
 			return err
 		}
-		fromBlock.Number = &nextBlock.BlockNumber
+		nextBlockNumber := deployBlock.BlockNumber + 1
+		fromBlock = &rpc.BlockID{Number: &nextBlockNumber}
+	} else {
+		log.Printf("Last block indexed: %v", vaultRegistry)
+		hash := *vaultRegistry.LastBlockIndexed
+		nextBlock, err := p.db.GetNextBlock(hash)
+		if err != nil {
+			log.Println("Block not found, wait to catch up", err)
+			return nil
+		}
+		fromBlock = &rpc.BlockID{Number: &nextBlock.BlockNumber}
 	}
 	log.Printf("From block: %v", fromBlock)
 
-	events, err := p.network.GetEvents(fromBlock, rpc.BlockID{Number: &toBlock}, &address)
+	if *fromBlock.Number > toBlock {
+		log.Println("From block is greater than to block, wait to catch up")
+		return nil
+	}
+	events, err := p.network.GetEvents(*fromBlock, rpc.BlockID{Number: &toBlock}, &address)
 	if err != nil {
 		log.Println("Error getting events", err)
 		return err
@@ -191,13 +204,13 @@ func (p *pitchlakePlugin) InitializeVault(vault models.VaultRegistry) error {
 		Hash: &hash,
 	}
 	log.Printf("Deploy block: %v", deployBlock)
-	events, err := p.network.GetEvents(deployBlock, deployBlock, &p.udcAddress)
+	events, err := p.network.GetEvents(deployBlock, deployBlock, nil)
 	if err != nil {
 		log.Println("Error getting events", err)
 		return err
 	}
 	p.db.BeginTx()
-	err = p.processDeploymentEvents(events, vault)
+	err = p.processDeploymentBlockEvents(events, vault)
 	if err != nil {
 		log.Println("Error processing deployment events", err)
 		p.db.RollbackTx()
@@ -313,7 +326,7 @@ func (p *pitchlakePlugin) RevertBlock(
 	return nil
 }
 
-func (p *pitchlakePlugin) processDeploymentEvents(
+func (p *pitchlakePlugin) processDeploymentBlockEvents(
 	events *rpc.EventChunk,
 	vault models.VaultRegistry,
 ) error {
@@ -322,7 +335,9 @@ func (p *pitchlakePlugin) processDeploymentEvents(
 	for index, event := range events.Events {
 
 		log.Printf("index: %v", index)
-		if eventNameHash == event.Keys[0].String() {
+		log.Printf("Event from address: %v", event.FromAddress.String())
+		log.Printf("UDC address: %v", p.udcAddress)
+		if eventNameHash == event.Keys[0].String() && event.FromAddress.String() == p.udcAddress {
 			log.Printf("Match")
 			address := utils.FeltToHexString(event.Data[0].Bytes())
 			log.Printf("Address: %v", address)
@@ -340,29 +355,31 @@ func (p *pitchlakePlugin) processDeploymentEvents(
 
 				p.db.StoreEvent(txHash, address, event.BlockNumber, "ContractDeployed", eventKeys, eventData)
 
-				//Process the round deployed event
-				vaultEvents, err := p.network.GetEvents(
-					rpc.BlockID{Number: &event.BlockNumber},
-					rpc.BlockID{Number: &event.BlockNumber},
-					&vault.Address,
-				)
-				if err != nil {
-					log.Printf("Error getting events", err)
-					return err
-				}
-				for _, event := range vaultEvents.Events {
-					junoEvent := core.Event{
-						From: event.FromAddress,
-						Keys: event.Keys,
-						Data: event.Data,
-					}
-					err := p.processVaultEvent(txHash, address, &junoEvent, event.BlockNumber)
-					if err != nil {
-						return err
-					}
-					p.db.UpdateVaultRegistry(vault.Address, event.BlockHash.String())
-				}
+				break
+
 			}
+
+		}
+	}
+
+	//Process other vault events in this block
+	for _, event := range events.Events {
+		junoEvent := core.Event{
+			From: event.FromAddress,
+			Keys: event.Keys,
+			Data: event.Data,
+		}
+		normalizedVaultAddress, err := utils.NormalizeHexAddress(vault.Address)
+		if err != nil {
+			log.Printf("Error normalizing address %v", err)
+			return err
+		}
+		if utils.FeltToHexString(event.FromAddress.Bytes()) == normalizedVaultAddress {
+			err := p.processVaultEvent(event.TransactionHash.String(), vault.Address, &junoEvent, event.BlockNumber)
+			if err != nil {
+				return err
+			}
+			p.db.UpdateVaultRegistry(vault.Address, event.BlockHash.String())
 		}
 	}
 	return nil
@@ -376,6 +393,11 @@ func (p *pitchlakePlugin) processVaultEvent(
 ) error {
 
 	// Store the event in the database
+	normalizedVaultAddress, err := utils.NormalizeHexAddress(vaultAddress)
+	if err != nil {
+		log.Printf("Error normalizing address %v", err)
+		return err
+	}
 	eventName, err := utils.DecodeEventNameVault(event.Keys[0].String())
 	if err != nil {
 		log.Printf("Unknown Event")
@@ -384,7 +406,7 @@ func (p *pitchlakePlugin) processVaultEvent(
 
 	// Store the event in the database
 	eventKeys, eventData := utils.EventToStringArrays(*event)
-	if err := p.db.StoreEvent(txHash, vaultAddress, blockNumber, eventName, eventKeys, eventData); err != nil {
+	if err := p.db.StoreEvent(txHash, normalizedVaultAddress, blockNumber, eventName, eventKeys, eventData); err != nil {
 		return err
 	}
 	return nil

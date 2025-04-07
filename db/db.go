@@ -72,7 +72,7 @@ func (db *DB) GetVaultRegistryByAddress(address string) (models.VaultRegistry, e
 		vault_address, 
 		deployed_at, 
 		last_block_indexed, 
-		last_block_indexed 
+		last_block_processed
 	FROM vault_registry 
 	WHERE vault_address = $1`
 
@@ -80,18 +80,33 @@ func (db *DB) GetVaultRegistryByAddress(address string) (models.VaultRegistry, e
 		&vaultRegistry.Address,
 		&vaultRegistry.DeployedAt,
 		&vaultRegistry.LastBlockIndexed,
-		&vaultRegistry.LastBlockIndexed,
+		&vaultRegistry.LastBlockProcessed,
 	)
 	return vaultRegistry, err
 }
 
-func (db *DB) GetNextBlock(hash string) (models.StarknetBlocks, error) {
+func (db *DB) GetNextBlock(hash string) (*models.StarknetBlocks, error) {
 	var block models.StarknetBlocks
+
+	log.Printf("Getting next block: %v", hash)
 	query := `
 	SELECT * FROM starknet_blocks 
 	WHERE parent_hash = $1`
-	err := db.tx.QueryRow(context.Background(), query, hash).Scan(&block)
-	return block, err
+	row, err := db.Conn.Query(context.Background(), query, hash)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer row.Close()
+	for row.Next() {
+		err = row.Scan(&block.BlockNumber, &block.BlockHash, &block.ParentHash, &block.Timestamp)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &block, nil
 }
 func (db *DB) GetBlock(hash string) (models.StarknetBlocks, error) {
 	var block models.StarknetBlocks

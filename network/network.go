@@ -18,6 +18,22 @@ type Network struct {
 	ctx      context.Context
 }
 
+func (n *Network) GetBlockByHash(hash string) (*rpc.BlockTxHashes, error) {
+	feltString, err := utils.HexStringToFelt(hash)
+	if err != nil {
+		return nil, err
+	}
+	hashFelt := felt.FromBytes(feltString)
+	block, err := n.provider.BlockWithTxHashes(n.ctx, rpc.BlockID{Hash: &hashFelt})
+	if err != nil {
+		return nil, err
+	}
+	blockTxHashes, ok := block.(*rpc.BlockTxHashes)
+	if !ok {
+		return nil, fmt.Errorf("unexpected block type for block %v", hash)
+	}
+	return blockTxHashes, nil
+}
 func NewNetwork() (*Network, error) {
 	provider, err := rpc.NewProvider(os.Getenv("RPC_URL"))
 	if err != nil {
@@ -29,20 +45,12 @@ func NewNetwork() (*Network, error) {
 	}, nil
 }
 
-func (n *Network) GetDeployerEvents(blockNumber uint64) (*rpc.EventChunk, error) {
-	udcAddress := os.Getenv("UDC_ADDRESS")
-	var block rpc.BlockID
-
-	block.Number = &blockNumber
-	events, err := n.GetEvents(block, block, &udcAddress)
-	if err != nil {
-		return nil, err
-	}
-	return events, nil
-}
-
 func (n *Network) GetEvents(fromBlock rpc.BlockID, toBlock rpc.BlockID, address *string) (*rpc.EventChunk, error) {
 	var addressFelt felt.Felt
+	filter := rpc.EventFilter{
+		FromBlock: fromBlock,
+		ToBlock:   toBlock,
+	}
 	if address != nil {
 		addreshHash, err := utils.HexStringToFelt(*address)
 		if err != nil {
@@ -50,12 +58,9 @@ func (n *Network) GetEvents(fromBlock rpc.BlockID, toBlock rpc.BlockID, address 
 			return nil, err
 		}
 		addressFelt = felt.FromBytes(addreshHash)
+		filter.Address = &addressFelt
 	}
-	filter := rpc.EventFilter{
-		FromBlock: fromBlock,
-		ToBlock:   toBlock,
-		Address:   &addressFelt,
-	}
+
 	log.Printf("Filter: %v", filter)
 	input := rpc.EventsInput{
 		EventFilter: filter,

@@ -9,14 +9,23 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -q -y
 
 WORKDIR /plugin
 
-COPY . . 
-RUN git submodule update --init --remote --recursive
+COPY juno/ ./juno/
+#RUN git submodule update --init --remote --recursive
 RUN bash -c 'cd juno && source ~/.cargo/env && VM_DEBUG=${VM_DEBUG} make juno'
 
 RUN pwd
 RUN ls
 
 # Then build the plugin
+COPY plugin/ ./plugin/
+COPY db/ ./db/
+COPY models/ ./models/
+COPY network/ ./network/
+COPY utils/ ./utils/
+COPY go.mod ./
+COPY go.sum ./
+COPY Makefile ./
+
 RUN go mod tidy
 RUN make build
 

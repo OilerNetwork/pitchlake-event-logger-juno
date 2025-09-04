@@ -35,132 +35,88 @@ docker-clean:
 # Database commands
 check-db:
 	@if docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		echo "✓ pitchlake-db is already running"; \
+		echo "✓ pitchlake-db is running and accessible via pitchlake-network"; \
 	else \
-		echo "✗ pitchlake-db is not running"; \
+		echo "✗ pitchlake-db is not running. Please start your pitchlake-db container first."; \
 	fi
 
-db-up:
-	@if docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		echo "Using existing pitchlake-db container"; \
-	else \
-		echo "Starting new pitchlake-db container..."; \
-		docker compose up db -d; \
-		echo "Waiting for database to be ready..."; \
-		sleep 5; \
-	fi
+# Local database commands (only if you want to use local db instead of pitchlake-db)
+db-up-local:
+	docker compose --profile local-db up db -d
 
-db-down:
-	@if docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		echo "Stopping pitchlake-db..."; \
-		docker compose stop db; \
-	else \
-		echo "pitchlake-db is not running"; \
-	fi
+db-down-local:
+	docker compose --profile local-db down
 
-db-logs:
-	@if docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		docker compose logs -f db; \
-	else \
-		echo "pitchlake-db is not running"; \
-	fi
+db-logs-local:
+	docker compose --profile local-db logs -f db
 
-# Migration commands
+# Migration commands (using pitchlake-db via network)
 migrate-up:
-	@echo "Running database migrations..."
-	@if [ -f .env ]; then \
-		export $$(cat .env | xargs); \
-	fi; \
-	if docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		echo "Using existing pitchlake-db container for migrations"; \
-		DB_CONTAINER="pitchlake-db"; \
-	elif docker ps --format "table {{.Names}}" | grep -q "juno-indexer-db"; then \
-		echo "Using juno-indexer-db container for migrations"; \
-		DB_CONTAINER="juno-indexer-db"; \
-	else \
-		echo "No database container found. Please start a database first."; \
+	@echo "Running database migrations on pitchlake-db..."
+	@if ! docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
+		echo "Error: pitchlake-db is not running. Please start your pitchlake-db container first."; \
 		exit 1; \
 	fi; \
-	if [ -z "$$DB_URL" ]; then \
-		echo "Error: DB_URL environment variable is not set"; \
-		echo "Please set DB_URL in your .env file (e.g., postgres://user:password@localhost:5433/database)"; \
-		exit 1; \
-	fi; \
-	if [ "$$DB_CONTAINER" = "pitchlake-db" ]; then \
-		DB_CONNECTION="postgres://pitchlake_user:pitchlake_password@localhost:5432/pitchlake"; \
+	echo "Checking if migrations are needed..."; \
+	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "events"; then \
+		echo "✓ events table already exists"; \
 	else \
-		DB_CONNECTION="$$DB_URL"; \
+		echo "Creating events table..."; \
+		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000001_create_events_table.up.sql; \
 	fi; \
-	docker exec -i $$DB_CONTAINER psql "$$DB_CONNECTION" < db/migrations/000001_create_events_table.up.sql; \
-	docker exec -i $$DB_CONTAINER psql "$$DB_CONNECTION" < db/migrations/000002_create_starknet_blocks_table.up.sql; \
-	docker exec -i $$DB_CONTAINER psql "$$DB_CONNECTION" < db/migrations/000003_vault_registry.up.sql; \
+	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "starknet_blocks"; then \
+		echo "✓ starknet_blocks table already exists"; \
+	else \
+		echo "Creating starknet_blocks table..."; \
+		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000002_create_starknet_blocks_table.up.sql; \
+	fi; \
+	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "vault_registry"; then \
+		echo "✓ vault_registry table already exists"; \
+	else \
+		echo "Creating vault_registry table..."; \
+		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000003_vault_registry.up.sql; \
+	fi; \
 	echo "✓ All migrations completed!"
 
 migrate-down:
-	@echo "Rolling back database migrations..."
-	@if [ -f .env ]; then \
-		export $$(cat .env | xargs); \
-	fi; \
-	if docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		echo "Using existing pitchlake-db container for rollback"; \
-		DB_CONTAINER="pitchlake-db"; \
-	elif docker ps --format "table {{.Names}}" | grep -q "juno-indexer-db"; then \
-		echo "Using juno-indexer-db container for rollback"; \
-		DB_CONTAINER="juno-indexer-db"; \
-	else \
-		echo "No database container found. Please start a database first."; \
+	@echo "Rolling back database migrations on pitchlake-db..."
+	@if ! docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
+		echo "Error: pitchlake-db is not running. Please start your pitchlake-db container first."; \
 		exit 1; \
 	fi; \
-	if [ -z "$$DB_URL" ]; then \
-		echo "Error: DB_URL environment variable is not set"; \
-		echo "Please set DB_URL in your .env file (e.g., postgres://user:password@localhost:5433/database)"; \
-		exit 1; \
+	echo "⚠️  WARNING: This will drop all tables and data!"; \
+	read -p "Are you sure you want to continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1; \
+	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "vault_registry"; then \
+		echo "Dropping vault_registry table..."; \
+		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000003_create_vault_registry.down.sql; \
 	fi; \
-	if [ "$$DB_CONTAINER" = "pitchlake-db" ]; then \
-		DB_CONNECTION="postgres://pitchlake_user:pitchlake_password@localhost:5432/pitchlake"; \
-	else \
-		DB_CONNECTION="$$DB_URL"; \
+	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "starknet_blocks"; then \
+		echo "Dropping starknet_blocks table..."; \
+		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000002_create_starknet_blocks_table.down.sql; \
 	fi; \
-	docker exec -i $$DB_CONTAINER psql "$$DB_CONNECTION" < db/migrations/000003_create_vault_registry.down.sql; \
-	docker exec -i $$DB_CONTAINER psql "$$DB_CONNECTION" < db/migrations/000002_create_starknet_blocks_table.down.sql; \
-	docker exec -i $$DB_CONTAINER psql "$$DB_CONNECTION" < db/migrations/000001_create_events_table.down.sql; \
+	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "events"; then \
+		echo "Dropping events table..."; \
+		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000001_create_events_table.down.sql; \
+	fi; \
 	echo "✓ All migrations rolled back!"
 
 migrate-status:
-	@echo "Checking migration status..."
-	@if [ -f .env ]; then \
-		export $$(cat .env | xargs); \
-	fi; \
-	if docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		echo "Using existing pitchlake-db container"; \
-		DB_CONTAINER="pitchlake-db"; \
-	elif docker ps --format "table {{.Names}}" | grep -q "juno-indexer-db"; then \
-		echo "Using juno-indexer-db container"; \
-		DB_CONTAINER="juno-indexer-db"; \
-	else \
-		echo "No database container found. Please start a database first."; \
-		exit 1; \
-	fi; \
-	if [ -z "$$DB_URL" ]; then \
-		echo "Error: DB_URL environment variable is not set"; \
-		echo "Please set DB_URL in your .env file (e.g., postgres://user:password@localhost:5433/database)"; \
+	@echo "Checking migration status on pitchlake-db..."
+	@if ! docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
+		echo "Error: pitchlake-db is not running. Please start your pitchlake-db container first."; \
 		exit 1; \
 	fi; \
 	echo "Checking tables..."; \
-	if [ "$$DB_CONTAINER" = "pitchlake-db" ]; then \
-		DB_CONNECTION="postgres://pitchlake_user:pitchlake_password@localhost:5432/pitchlake"; \
-	else \
-		DB_CONNECTION="$$DB_URL"; \
-	fi; \
-	docker exec $$DB_CONTAINER psql "$$DB_CONNECTION" -c "\dt" 2>/dev/null || echo "Could not connect to database"
+	docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null || echo "Could not connect to database"
 
 # Development setup
-dev: check-db migrate-up
+dev: check-db migrate-up docker-build
 	@echo ""
 	@echo "🚀 Development environment ready!"
-	@echo "📊 Database: $(shell if docker ps --format 'table {{.Names}}' | grep -q 'pitchlake-db'; then echo 'pitchlake-db (existing)'; else echo 'juno-indexer-db (local)'; fi)"
+	@echo "📊 Database: pitchlake-db (connected via pitchlake-network)"
+	@echo "🔧 Docker image: Built successfully"
 	@echo "📋 Next steps:"
-	@echo "   • Run 'make docker-build' to build the Docker image"
-	@echo "   • Then run 'make docker-up' to start the application"
+	@echo "   • Run 'make docker-up' to start the application"
 	@echo "   • Or run 'make docker-up-detached' to run in background"
 	@echo "   • Use 'make docker-logs' to view application logs"
+	@echo "   • Use 'make migrate-status' to check database tables"

@@ -1,5 +1,6 @@
 
 services:
+  # Local database service (only used if pitchlake-db is not available)
   db:
     image: postgres:16
     environment:
@@ -15,6 +16,8 @@ services:
       retries: 5
     ports:
       - "5430:5432"
+    profiles:
+      - local-db
 
   juno_plugin:
     volumes:
@@ -31,13 +34,16 @@ services:
       RPC_URL: ${RPC_URL}
       L1_URL: ${L1_URL}
       CURSOR: ${CURSOR}
-      DB_URL: ${DB_URL:-postgres://postgres:postgres@db:5432/juno_indexer?sslmode=disable}
+      DB_URL: ${DB_URL:-postgres://pitchlake_user:pitchlake_password@pitchlake-db:5432/pitchlake?sslmode=disable}
       DEPLOYER: ${DEPLOYER}
-    depends_on:
-      db:
-        condition: service_healthy
+    networks:
+      - pitchlake-network
     ports:
       - "6060:6060" # Adjust this port if needed
 
 volumes:
   postgres_data:
+
+networks:
+  pitchlake-network:
+    external: true

@@ -113,7 +113,7 @@ func (n *Network) GetBlocks(fromBlock uint64, toBlock uint64) ([]*models.Starkne
 			blockHeader := blockTxHashes.BlockHeader
 			starknetBlock := &models.StarknetBlocks{
 				BlockNumber: blockNum,
-				BlockHash:   blockHeader.BlockHash.String(),
+				BlockHash:   blockHeader.Hash.String(),
 				ParentHash:  blockHeader.ParentHash.String(),
 				Timestamp:   blockHeader.Timestamp,
 			}

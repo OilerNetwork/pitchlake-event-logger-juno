@@ -152,7 +152,7 @@ func (p *pitchlakePlugin) CatchupVault(address string, toBlock uint64) error {
 			log.Println("Error getting deploy block", err)
 			return err
 		}
-		nextBlockNumber := deployBlock.BlockNumber + 1
+		nextBlockNumber := deployBlock.Number + 1
 		fromBlock = &rpc.BlockID{Number: &nextBlockNumber}
 	} else {
 		log.Printf("Last block indexed: %v", vaultRegistry)

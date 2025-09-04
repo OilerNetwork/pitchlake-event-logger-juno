@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -35,20 +32,20 @@ func Init(dbUrl string) (*DB, error) {
 		return nil, fmt.Errorf("unable to create connection pool: %w", err)
 	}
 
-	m, err := migrate.New(
-		"file://db/migrations",
-		dbUrl)
-	if err != nil {
-		log.Printf("FAIlED HERE 1")
-		return nil, err
-	}
-	if err := m.Up(); err != nil {
-		if err != migrate.ErrNoChange {
-			return nil, err
-		}
+	// m, err := migrate.New(
+	// 	"file://db/migrations",
+	// 	dbUrl)
+	// if err != nil {
+	// 	log.Printf("FAIlED HERE 1")
+	// 	return nil, err
+	// }
+	// if err := m.Up(); err != nil {
+	// 	if err != migrate.ErrNoChange {
+	// 		return nil, err
+	// 	}
 
-	}
-	m.Close()
+	// }
+	// m.Close()
 
 	return &DB{
 		Pool: pool,

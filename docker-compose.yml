@@ -37,7 +37,7 @@ services:
       DB_URL: ${DB_URL:-postgres://pitchlake_user:pitchlake_password@pitchlake-db:5432/pitchlake?sslmode=disable}
       DEPLOYER: ${DEPLOYER}
     networks:
-      - pitchlake-network
+      - consolidated-server_pitchlake-network
     ports:
       - "6060:6060" # Adjust this port if needed
 
@@ -45,5 +45,5 @@ volumes:
   postgres_data:
 
 networks:
-  pitchlake-network:
+  consolidated-server_pitchlake-network:
     external: true

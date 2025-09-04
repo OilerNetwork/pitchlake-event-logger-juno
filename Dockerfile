@@ -24,6 +24,7 @@ COPY network/ ./network/
 COPY utils/ ./utils/
 COPY go.mod ./
 COPY go.sum ./
+COPY go.work ./
 COPY Makefile ./
 
 RUN go mod tidy

@@ -32,85 +32,16 @@ docker-clean:
 	docker compose down -v --remove-orphans
 	docker system prune -f
 
-# Database commands
-check-db:
-	@if docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		echo "✓ pitchlake-db is running and accessible via pitchlake-network"; \
-	else \
-		echo "✗ pitchlake-db is not running. Please start your pitchlake-db container first."; \
-	fi
-
-# Local database commands (only if you want to use local db instead of pitchlake-db)
-db-up-local:
-	docker compose --profile local-db up db -d
-
-db-down-local:
-	docker compose --profile local-db down
-
-db-logs-local:
-	docker compose --profile local-db logs -f db
-
-# Migration commands (using pitchlake-db via network)
-migrate-up:
-	@echo "Running database migrations on pitchlake-db..."
-	@if ! docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		echo "Error: pitchlake-db is not running. Please start your pitchlake-db container first."; \
-		exit 1; \
-	fi; \
-	echo "Checking if migrations are needed..."; \
-	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "events"; then \
-		echo "✓ events table already exists"; \
-	else \
-		echo "Creating events table..."; \
-		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000001_create_events_table.up.sql; \
-	fi; \
-	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "starknet_blocks"; then \
-		echo "✓ starknet_blocks table already exists"; \
-	else \
-		echo "Creating starknet_blocks table..."; \
-		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000002_create_starknet_blocks_table.up.sql; \
-	fi; \
-	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "vault_registry"; then \
-		echo "✓ vault_registry table already exists"; \
-	else \
-		echo "Creating vault_registry table..."; \
-		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000003_vault_registry.up.sql; \
-	fi; \
-	echo "✓ All migrations completed!"
-
-migrate-down:
-	@echo "Rolling back database migrations on pitchlake-db..."
-	@if ! docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		echo "Error: pitchlake-db is not running. Please start your pitchlake-db container first."; \
-		exit 1; \
-	fi; \
-	echo "⚠️  WARNING: This will drop all tables and data!"; \
-	read -p "Are you sure you want to continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1; \
-	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "vault_registry"; then \
-		echo "Dropping vault_registry table..."; \
-		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000003_create_vault_registry.down.sql; \
-	fi; \
-	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "starknet_blocks"; then \
-		echo "Dropping starknet_blocks table..."; \
-		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000002_create_starknet_blocks_table.down.sql; \
-	fi; \
-	if docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null | grep -q "events"; then \
-		echo "Dropping events table..."; \
-		docker exec -i pitchlake-db psql -U pitchlake_user -d pitchlake < db/migrations/000001_create_events_table.down.sql; \
-	fi; \
-	echo "✓ All migrations rolled back!"
-
-migrate-status:
-	@echo "Checking migration status on pitchlake-db..."
-	@if ! docker ps --format "table {{.Names}}" | grep -q "pitchlake-db"; then \
-		echo "Error: pitchlake-db is not running. Please start your pitchlake-db container first."; \
-		exit 1; \
-	fi; \
-	echo "Checking tables..."; \
-	docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "\dt" 2>/dev/null || echo "Could not connect to database"
+docker-restart-network:
+	docker compose down --remove-orphans
+	docker compose up -d
 
 # Development setup
-dev: check-db migrate-up docker-build
+dev: docker-restart-network
+	@echo "🔧 Building Docker image..."
+	@make docker-build
+	@echo "📊 Setting up infrastructure..."
+	@make -f Makefile.infra check-db migrate-up
 	@echo ""
 	@echo "🚀 Development environment ready!"
 	@echo "📊 Database: pitchlake-db (connected via pitchlake-network)"
@@ -119,4 +50,4 @@ dev: check-db migrate-up docker-build
 	@echo "   • Run 'make docker-up' to start the application"
 	@echo "   • Or run 'make docker-up-detached' to run in background"
 	@echo "   • Use 'make docker-logs' to view application logs"
-	@echo "   • Use 'make migrate-status' to check database tables"
+	@echo "   • Use 'make -f Makefile.infra migrate-status' to check database tables"

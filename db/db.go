@@ -16,7 +16,7 @@ func (db *DB) GetVaultRegistry() ([]*models.VaultRegistry, error) {
 		vault_address, 
 		deployed_at, 
 		last_block_indexed, 
-		last_block_indexed 
+		last_block_processed 
 	FROM vault_registry`
 	rows, err := db.Pool.Query(context.Background(), query)
 	if err != nil {
@@ -29,7 +29,7 @@ func (db *DB) GetVaultRegistry() ([]*models.VaultRegistry, error) {
 
 	for rows.Next() {
 		var vault models.VaultRegistry
-		if err := rows.Scan(&vault.Address, &vault.DeployedAt, &vault.LastBlockIndexed, &vault.LastBlockIndexed); err != nil {
+		if err := rows.Scan(&vault.Address, &vault.DeployedAt, &vault.LastBlockIndexed, &vault.LastBlockProcessed); err != nil {
 			return nil, err
 		}
 		vaultRegistry = append(vaultRegistry, &vault)
@@ -92,21 +92,14 @@ func (db *DB) GetNextBlock(hash string) (*models.StarknetBlocks, error) {
 
 	log.Printf("Getting next block: %v", hash)
 	query := `
-	SELECT * FROM starknet_blocks 
+	SELECT block_number, block_hash, parent_hash, timestamp, status FROM starknet_blocks 
 	WHERE parent_hash = $1`
-	row, err := db.Pool.Query(context.Background(), query, hash)
+	err := db.Pool.QueryRow(context.Background(), query, hash).Scan(&block.BlockNumber, &block.BlockHash, &block.ParentHash, &block.Timestamp, &block.Status)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
-	}
-	defer row.Close()
-	for row.Next() {
-		err = row.Scan(&block.BlockNumber, &block.BlockHash, &block.ParentHash, &block.Timestamp)
-		if err != nil {
-			return nil, err
-		}
 	}
 	return &block, nil
 }

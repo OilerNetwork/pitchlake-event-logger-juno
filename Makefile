@@ -213,6 +213,8 @@ list-vaults:
 	@docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "SELECT vault_address, deployed_at, last_block_indexed, last_block_processed FROM vault_registry ORDER BY id;" || echo "Failed to list vaults. Make sure the container is running."
 list-events:
 	@docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "SELECT * from events"
+list-blocks:
+	@docker exec pitchlake-db psql -U pitchlake_user -d pitchlake -c "SELECT * from starknet_blocks"
 
 # Infrastructure help
 help-infra:

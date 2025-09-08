@@ -54,6 +54,7 @@ func (vm *Manager) LoadVaultsFromRegistry(latestBlock *models.StarknetBlocks) er
 			if latestBlock == nil {
 				return nil
 			}
+
 			lastBlockIndexed, err := vm.db.GetBlock(*vault.LastBlockIndexed)
 			if err != nil {
 				return err
@@ -127,6 +128,30 @@ func (vm *Manager) InitializeVault(vault *models.VaultRegistry) error {
 		vm.db.RollbackTx()
 		return err
 	}
+
+	// Save the block as well in db if it doesn't exist
+	// block, err := vm.db.GetBlock(vault.DeployedAt)
+	// if err != nil {
+	// 	return err
+	// }
+
+	// if block == nil {
+	// 	//get block from network
+	// 	networkBlock, err := vm.network.GetBlockByHash(vault.DeployedAt)
+
+	// 	if err != nil {
+	// 		return nil
+	// 	}
+
+	// 	starknetBlock := models.RPCBlockToStarknetBlock(networkBlock)
+
+	// 	err = vm.db.InsertBlock(starknetBlock)
+	// 	if err != nil {
+	// 		vm.db.RollbackTx()
+	// 		vm.log.Println("Error inserting block", err)
+	// 		return err
+	// 	}
+	// }
 	vm.db.CommitTx()
 	return nil
 }
@@ -138,19 +163,36 @@ func (vm *Manager) CatchupVault(vault models.VaultRegistry, toBlock uint64) erro
 	vm.log.Printf("Vault registry: %v", vault.LastBlockIndexed)
 	vm.log.Printf("Last block indexed: %v", vault)
 	hash := *vault.LastBlockIndexed
-	lastBlock, err := vm.db.GetBlock(hash)
 
-	if err != nil {
-		vm.log.Println("Block not found, wait to catch up", err)
-		return err
-	}
 	nextBlock, err := vm.db.GetNextBlock(hash)
 	if err != nil {
-		vm.log.Println("Block not found, wait to catch up", err)
 		return err
 	}
-	fromBlock = &rpc.BlockID{Number: &nextBlock.BlockNumber}
-	vm.log.Printf("From block: %v", nextBlock.BlockNumber)
+
+	if nextBlock == nil {
+		//get last block from db
+		lastBlock, err := vm.db.GetBlock(hash)
+		if err != nil {
+			return err
+		}
+
+		if lastBlock == nil {
+			lastBlockNetwork, err := vm.network.GetBlockByHash(hash)
+			if err != nil {
+				return err
+			}
+			nextBlocks, err := vm.network.GetBlocks(lastBlockNetwork.BlockHeader.Number+1, lastBlockNetwork.BlockHeader.Number+1)
+			if len(nextBlocks) == 0 {
+				vm.log.Printf("No blocks returned for block number: %d", lastBlockNetwork.BlockHeader.Number+1)
+				return fmt.Errorf("no block found at number %d", lastBlockNetwork.BlockHeader.Number+1)
+			}
+			log.Printf("nextBlocks %v", nextBlocks)
+			nextBlock = nextBlocks[0]
+			//create new int
+			fromBlock = &rpc.BlockID{Number: &nextBlock.BlockNumber}
+		}
+
+	}
 
 	if *fromBlock.Number > toBlock {
 		vm.log.Println("From block is greater than to block, wait to catch up")
@@ -163,6 +205,7 @@ func (vm *Manager) CatchupVault(vault models.VaultRegistry, toBlock uint64) erro
 		return err
 	}
 
+	vm.db.BeginTx()
 	for _, event := range events.Events {
 		coreEvent := core.Event{
 			From: event.FromAddress,
@@ -172,9 +215,19 @@ func (vm *Manager) CatchupVault(vault models.VaultRegistry, toBlock uint64) erro
 		err := vm.ProcessVaultEvent(event.TransactionHash.String(), vault.Address, &coreEvent, event.BlockNumber, *event.BlockHash)
 		if err != nil {
 			vm.log.Println("Error processing vault event", err)
+			vm.db.RollbackTx()
 			return err
+
 		}
 	}
+
+	//Store block as well, nextBlock should never be null by the time we reach here
+	if err := vm.db.InsertBlock(nextBlock); err != nil {
+		vm.db.RollbackTx()
+		return err
+	}
+	vm.db.CommitTx()
+
 	return nil
 }
 

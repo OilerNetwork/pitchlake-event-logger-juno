@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/NethermindEth/juno/core"
+	"github.com/NethermindEth/starknet.go/rpc"
 )
 
 type BigInt struct {
@@ -60,6 +61,16 @@ func CoreToStarknetBlock(block core.Block) StarknetBlocks {
 		Status:      "MINED",
 	}
 	return starknetBlock
+}
+
+func RPCBlockToStarknetBlock(rpcBlock *rpc.BlockTxHashes) *StarknetBlocks {
+	return &StarknetBlocks{
+		BlockNumber: rpcBlock.BlockHeader.Number, // Keep the * to dereference
+		BlockHash:   rpcBlock.BlockHeader.Hash.String(),
+		ParentHash:  rpcBlock.BlockHeader.ParentHash.String(),
+		Timestamp:   rpcBlock.BlockHeader.Timestamp,
+		Status:      "MINED",
+	}
 }
 
 type Event struct {

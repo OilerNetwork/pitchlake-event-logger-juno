@@ -98,14 +98,10 @@ func (pc *PluginCore) CheckAndSync(block *models.StarknetBlocks) error {
 	}
 
 	log.Printf("Syncing vaults")
-
 	if err := pc.vaultManager.LoadVaultsFromRegistry(block); err != nil {
 		return fmt.Errorf("failed to initialize vaults: %w", err)
 	}
 
-	if err := pc.blockProcessor.CatchupBlocks(block.BlockNumber); err != nil {
-		return fmt.Errorf("failed to catchup blockdata: %w", err)
-	}
 	pc.log.Println("Plugin core initialized successfully")
 
 	//Only set this to true if no failures

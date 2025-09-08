@@ -123,11 +123,16 @@ func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 		}
 
 		for _, block := range blocks {
+
+			//Should create a seperate version of insert block, the ideal solution is better refactor to be able to use tx more easily
+			bp.db.BeginTx()
 			err := bp.db.InsertBlock(block)
 			if err != nil {
+				bp.db.RollbackTx()
 				bp.log.Println("Error inserting block", err)
 				return err
 			}
+			bp.db.CommitTx()
 		}
 		startBlock = endBlock
 	}

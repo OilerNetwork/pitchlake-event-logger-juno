@@ -11,20 +11,15 @@ import (
 
 type DB struct {
 	Pool *pgxpool.Pool
-	Conn *pgx.Conn
 	tx   pgx.Tx
 	ctx  context.Context
+	url  string
 }
 
 func Init(dbUrl string) (*DB, error) {
 	config, err := pgxpool.ParseConfig(dbUrl)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse connection string: %w", err)
-	}
-
-	conn, err := pgx.Connect(context.Background(), dbUrl)
-	if err != nil {
-		return nil, fmt.Errorf("unable to connect to database: %w", err)
 	}
 
 	pool, err := pgxpool.NewWithConfig(context.Background(), config)
@@ -49,20 +44,20 @@ func Init(dbUrl string) (*DB, error) {
 
 	return &DB{
 		Pool: pool,
-		Conn: conn,
 		ctx:  context.Background(),
+		url:  dbUrl, //Unsafe possibly, need to consolidate config better
 	}, nil
 
 }
 
 func (db *DB) Shutdown() {
 	db.Pool.Close()
-	db.Conn.Close(context.Background())
 }
 
 func (db *DB) BeginTx() {
-	tx, err := db.Pool.Begin(db.ctx)
+	tx, err := db.Pool.Begin(context.TODO())
 	if err != nil {
+		log.Printf("WTHELLY TX WAALA")
 		log.Fatal(err)
 	}
 	db.tx = tx

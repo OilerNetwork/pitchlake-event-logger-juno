@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"junoplugin/db"
+	"junoplugin/models"
 	"junoplugin/network"
 	"junoplugin/plugin/block"
 	"junoplugin/plugin/config"
@@ -22,6 +23,7 @@ type PluginCore struct {
 	vaultManager   *vault.Manager
 	blockProcessor *block.Processor
 	log            *log.Logger
+	synced         bool
 }
 
 // NewPluginCore creates a new plugin core
@@ -79,14 +81,6 @@ func NewPluginCore() (*PluginCore, error) {
 
 // Initialize initializes the plugin
 func (pc *PluginCore) Initialize() error {
-	pc.log.Println("Initializing plugin core")
-
-	// Initialize vaults
-	if err := pc.vaultManager.InitializeVaults(pc.blockProcessor.GetLastBlock()); err != nil {
-		return fmt.Errorf("failed to initialize vaults: %w", err)
-	}
-
-	pc.log.Println("Plugin core initialized successfully")
 	return nil
 }
 
@@ -97,12 +91,38 @@ func (pc *PluginCore) Shutdown() error {
 	return nil
 }
 
+func (pc *PluginCore) CheckAndSync(block *models.StarknetBlocks) error {
+
+	if pc.synced == true {
+		return nil
+	}
+
+	log.Printf("Syncing vaults")
+
+	if err := pc.vaultManager.LoadVaultsFromRegistry(block); err != nil {
+		return fmt.Errorf("failed to initialize vaults: %w", err)
+	}
+
+	if err := pc.blockProcessor.CatchupBlocks(block.BlockNumber); err != nil {
+		return fmt.Errorf("failed to catchup blockdata: %w", err)
+	}
+	pc.log.Println("Plugin core initialized successfully")
+
+	//Only set this to true if no failures
+	pc.synced = true
+	return nil
+}
+
 // NewBlock processes a new block
 func (pc *PluginCore) NewBlock(
 	block *core.Block,
 	stateUpdate *core.StateUpdate,
 	newClasses map[felt.Felt]core.Class,
 ) error {
+	starknetBlock := models.CoreToStarknetBlock(*block)
+	if err := pc.CheckAndSync(&starknetBlock); err != nil {
+		return err
+	}
 	return pc.blockProcessor.ProcessNewBlock(block, stateUpdate, newClasses)
 }
 
@@ -112,6 +132,11 @@ func (pc *PluginCore) RevertBlock(
 	to *junoplugin.BlockAndStateUpdate,
 	reverseStateDiff *core.StateDiff,
 ) error {
+
+	starknetBlock := models.CoreToStarknetBlock(*from.Block)
+	if err := pc.CheckAndSync(&starknetBlock); err != nil {
+		return err
+	}
 	return pc.blockProcessor.RevertBlock(from, to, reverseStateDiff)
 }
 

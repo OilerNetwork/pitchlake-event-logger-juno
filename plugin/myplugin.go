@@ -43,7 +43,7 @@ func (p *pitchlakePlugin) Init() error {
 	}
 
 	// Start the vault registry listener
-	p.listener = listener.NewService(p.core.GetDB(), p.core.GetVaultManager())
+	p.listener = listener.NewListenerService(p.core.GetVaultManager())
 	if err := p.listener.Start(); err != nil {
 		return err
 	}

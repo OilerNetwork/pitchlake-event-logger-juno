@@ -54,15 +54,7 @@ func (bp *Processor) ProcessNewBlock(
 
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
-
 	// Check if we need to catch up
-	if bp.lastBlockDB != nil && bp.lastBlockDB.BlockNumber < block.Number-1 {
-		err := bp.CatchupIndexer(block.Number)
-		if err != nil {
-			bp.log.Println("Error catching up indexer", err)
-			return err
-		}
-	}
 
 	bp.db.BeginTx()
 	bp.log.Println("Processing new block", block.Number)
@@ -76,13 +68,7 @@ func (bp *Processor) ProcessNewBlock(
 	}
 
 	// Store the block
-	starknetBlock := models.StarknetBlocks{
-		BlockNumber: block.Number,
-		BlockHash:   block.Hash.String(),
-		ParentHash:  block.ParentHash.String(),
-		Timestamp:   block.Timestamp,
-		Status:      "MINED",
-	}
+	starknetBlock := models.CoreToStarknetBlock(*block)
 
 	err = bp.db.InsertBlock(&starknetBlock)
 	if err != nil {
@@ -114,22 +100,19 @@ func (bp *Processor) RevertBlock(
 	return nil
 }
 
-// CatchupIndexer catches up the indexer to a specific block
-func (bp *Processor) CatchupIndexer(latestBlock uint64) error {
-	startBlock := bp.lastBlockDB.BlockNumber
-	for startBlock < latestBlock {
-		endBlock := startBlock + 1000
-		if endBlock > latestBlock {
-			endBlock = latestBlock
-		}
+func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 
-		// Catch up all vaults
-		for vaultAddr := range bp.vaultManager.GetVaultAddresses() {
-			err := bp.vaultManager.CatchupVault(vaultAddr, endBlock)
-			if err != nil {
-				bp.log.Println("Error catching up vault", err)
-				return err
-			}
+	//Leaving this as a potential usage,  we use this to decide how much block data we wanna back fill (in case of a very edge case of clean starting block getting reorged)
+	backFillIndex := uint64(3)
+	startBlock := latestBlock - uint64(backFillIndex)
+	if bp.lastBlockDB != nil {
+		startBlock = bp.lastBlockDB.BlockNumber
+	}
+
+	for startBlock < latestBlock-1 {
+		endBlock := startBlock + 1000
+		if endBlock >= latestBlock {
+			endBlock = latestBlock - 1
 		}
 
 		bp.log.Println("Catching up indexer from", startBlock, "to", endBlock)
@@ -146,10 +129,8 @@ func (bp *Processor) CatchupIndexer(latestBlock uint64) error {
 				return err
 			}
 		}
-
 		startBlock = endBlock
 	}
-
 	return nil
 }
 
@@ -171,7 +152,7 @@ func (bp *Processor) processBlockEvents(block *core.Block) error {
 		for _, event := range receipt.Events {
 			fromAddress := event.From.String()
 			if bp.vaultManager.IsVaultAddress(fromAddress) {
-				err := bp.vaultManager.ProcessVaultEvent(receipt.TransactionHash.String(), fromAddress, event, block.Number)
+				err := bp.vaultManager.ProcessVaultEvent(receipt.TransactionHash.String(), fromAddress, event, block.Number, *block.Hash)
 				if err != nil {
 					bp.log.Println("Error processing vault event", err)
 					return err

@@ -47,19 +47,24 @@ func (n *Network) GetBlockByHash(hash string) (*rpc.BlockTxHashes, error) {
 }
 
 func (n *Network) GetEvents(fromBlock rpc.BlockID, toBlock rpc.BlockID, address *string) (*rpc.EventChunk, error) {
+
+	//Should be written bettern
 	var addressFelt felt.Felt
+	var addressBytes []byte
+	var err error
 	filter := rpc.EventFilter{
 		FromBlock: fromBlock,
 		ToBlock:   toBlock,
 	}
 	if address != nil {
-		addreshHash, err := utils.HexStringToFelt(*address)
-		if err != nil {
-			log.Printf("Error getting felt %f", err)
-			return nil, err
-		}
-		addressFelt = felt.FromBytes(addreshHash)
+		addressBytes, err = utils.HexStringToFelt(*address)
+		addressFelt = felt.FromBytes(addressBytes)
 		filter.Address = &addressFelt
+
+	}
+	if err != nil {
+		log.Printf("Error getting felt %f", err)
+		return nil, err
 	}
 
 	log.Printf("Filter: %v", filter)
@@ -86,7 +91,7 @@ func (n *Network) GetBlocks(fromBlock uint64, toBlock uint64) ([]*models.Starkne
 	// Channel for errors
 	errCh := make(chan error, numBlocks)
 	// Semaphore to limit concurrency
-	maxConcurrent := 100 // Adjust based on your needs
+	maxConcurrent := 10 // Adjust based on your needs
 	sem := make(chan struct{}, maxConcurrent)
 
 	for i := fromBlock; i <= toBlock; i++ {

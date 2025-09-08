@@ -15,59 +15,99 @@ import (
 
 // Manager handles vault-related operations
 type Manager struct {
-	db                *db.DB
-	network           *network.Network
-	vaultAddressesMap map[string]struct{}
-	udcAddress        string
-	log               *log.Logger
+	db               *db.DB
+	network          *network.Network
+	vaultRegistryMap map[string]*models.VaultRegistry
+	udcAddress       string
+	log              *log.Logger
 }
 
 // NewManager creates a new vault manager
 func NewManager(db *db.DB, network *network.Network, udcAddress string) *Manager {
 	return &Manager{
-		db:                db,
-		network:           network,
-		vaultAddressesMap: make(map[string]struct{}),
-		udcAddress:        udcAddress,
-		log:               log.Default(),
+		db:               db,
+		network:          network,
+		vaultRegistryMap: make(map[string]*models.VaultRegistry),
+		udcAddress:       udcAddress,
+		log:              log.Default(),
 	}
 }
 
 // InitializeVaults initializes existing vaults from the database
-func (vm *Manager) InitializeVaults(lastBlock *models.StarknetBlocks) error {
+func (vm *Manager) LoadVaultsFromRegistry(latestBlock *models.StarknetBlocks) error {
 	vaultRegistry, err := vm.db.GetVaultRegistry()
 	if err != nil {
 		return fmt.Errorf("failed to get vault registry: %w", err)
 	}
 
-	// Initialize existing vaults
+	// Catchup vaults while loading in mem to avoid reiterating later with SyncVaults call
 	if len(vaultRegistry) > 0 {
 		for _, vault := range vaultRegistry {
-			if vault.LastBlockIndexed != &lastBlock.BlockHash {
-				if err := vm.CatchupVault(vault.Address, lastBlock.BlockNumber); err != nil {
+			if vault.LastBlockIndexed == nil {
+				vm.InitializeVault(vault)
+			}
+
+			//Do this before the lastBlock escape
+			vm.vaultRegistryMap[vault.Address] = vault
+
+			//Escape if we don't have the latest block, we shouldn't need this if used only after initialization
+			if latestBlock == nil {
+				return nil
+			}
+			lastBlockIndexed, err := vm.db.GetBlock(*vault.LastBlockIndexed)
+			if err != nil {
+				return err
+			}
+
+			if lastBlockIndexed == nil || lastBlockIndexed.BlockNumber < latestBlock.BlockNumber-1 {
+				if err := vm.CatchupVault(*vault, latestBlock.BlockNumber); err != nil {
 					return fmt.Errorf("failed to catchup vault %s: %w", vault.Address, err)
 				}
-				vm.vaultAddressesMap[vault.Address] = struct{}{}
+
 			}
 		}
 	}
 
-	vm.log.Printf("Vault addresses: %v", vm.vaultAddressesMap)
-	vm.log.Printf("Last block: %v", lastBlock)
+	vm.log.Printf("Vault addresses: %v", vm.vaultRegistryMap)
+	vm.log.Printf("Last block: %v", latestBlock)
+
+	return nil
+}
+
+func (vm *Manager) SyncVaults(head *models.StarknetBlocks) error {
+	vaultRegistry := &vm.vaultRegistryMap
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get vault registry: %w", err)
+	// }
+	for _, vault := range *vaultRegistry {
+		if vault.LastBlockIndexed == nil {
+			vm.InitializeVault(vault)
+		}
+		if head == nil {
+			log.Printf("No last block found, starting node to find current block")
+			return nil
+		}
+		if *vault.LastBlockIndexed != head.BlockHash {
+			if err := vm.CatchupVault(*vault, head.BlockNumber); err != nil {
+				return fmt.Errorf("failed to catchup vault %s: %w", vault.Address, err)
+			}
+		}
+	}
 
 	return nil
 }
 
 // InitializeVault initializes a new vault
-func (vm *Manager) InitializeVault(vault models.VaultRegistry) error {
+func (vm *Manager) InitializeVault(vault *models.VaultRegistry) error {
 	deployBlockHash, err := utils.HexStringToFelt(vault.DeployedAt)
 	if err != nil {
 		vm.log.Println("Error getting felt", err)
 		return err
 	}
+
 	hash := felt.FromBytes(deployBlockHash)
 
-	hash.SetString(vault.DeployedAt)
+	// hash.SetString(vault.DeployedAt)
 	deployBlock := rpc.BlockID{
 		Hash: &hash,
 	}
@@ -78,6 +118,7 @@ func (vm *Manager) InitializeVault(vault models.VaultRegistry) error {
 		vm.log.Println("Error getting events", err)
 		return err
 	}
+	log.Printf("events list %v", len(events.Events))
 
 	vm.db.BeginTx()
 	err = vm.processDeploymentBlockEvents(events, vault)
@@ -87,58 +128,36 @@ func (vm *Manager) InitializeVault(vault models.VaultRegistry) error {
 		return err
 	}
 	vm.db.CommitTx()
-
-	vm.log.Printf("Processing catchup vault")
-	err = vm.CatchupVault(vault.Address, 0) // Will be set to proper block number by caller
-	if err != nil {
-		return err
-	}
-	vm.vaultAddressesMap[vault.Address] = struct{}{}
 	return nil
 }
 
 // CatchupVault catches up a vault to a specific block
-func (vm *Manager) CatchupVault(address string, toBlock uint64) error {
-	vaultRegistry, err := vm.db.GetVaultRegistryByAddress(address)
-	if err != nil {
-		vm.log.Println("Error getting vault registry", err)
-		return err
-	}
-	vm.log.Printf("Vault registry: %v", vaultRegistry)
+func (vm *Manager) CatchupVault(vault models.VaultRegistry, toBlock uint64) error {
 
 	var fromBlock *rpc.BlockID
-	vm.log.Printf("Vault registry: %v", vaultRegistry.LastBlockIndexed)
-	if vaultRegistry.LastBlockIndexed == nil {
-		err = vm.InitializeVault(vaultRegistry)
-		if err != nil {
-			vm.log.Println("Error initializing vault", err)
-			return err
-		}
-		deployBlock, err := vm.network.GetBlockByHash(vaultRegistry.DeployedAt)
-		if err != nil {
-			vm.log.Println("Error getting deploy block", err)
-			return err
-		}
-		nextBlockNumber := deployBlock.Number + 1
-		fromBlock = &rpc.BlockID{Number: &nextBlockNumber}
-	} else {
-		vm.log.Printf("Last block indexed: %v", vaultRegistry)
-		hash := *vaultRegistry.LastBlockIndexed
-		nextBlock, err := vm.db.GetNextBlock(hash)
-		if err != nil {
-			vm.log.Println("Block not found, wait to catch up", err)
-			return nil
-		}
-		fromBlock = &rpc.BlockID{Number: &nextBlock.BlockNumber}
+	vm.log.Printf("Vault registry: %v", vault.LastBlockIndexed)
+	vm.log.Printf("Last block indexed: %v", vault)
+	hash := *vault.LastBlockIndexed
+	lastBlock, err := vm.db.GetBlock(hash)
+
+	if err != nil {
+		vm.log.Println("Block not found, wait to catch up", err)
+		return err
 	}
-	vm.log.Printf("From block: %v", fromBlock)
+	nextBlock, err := vm.db.GetNextBlock(hash)
+	if err != nil {
+		vm.log.Println("Block not found, wait to catch up", err)
+		return err
+	}
+	fromBlock = &rpc.BlockID{Number: &nextBlock.BlockNumber}
+	vm.log.Printf("From block: %v", nextBlock.BlockNumber)
 
 	if *fromBlock.Number > toBlock {
 		vm.log.Println("From block is greater than to block, wait to catch up")
 		return nil
 	}
 
-	events, err := vm.network.GetEvents(*fromBlock, rpc.BlockID{Number: &toBlock}, &address)
+	events, err := vm.network.GetEvents(*fromBlock, rpc.BlockID{Number: &toBlock}, &vault.Address)
 	if err != nil {
 		vm.log.Println("Error getting events", err)
 		return err
@@ -150,7 +169,7 @@ func (vm *Manager) CatchupVault(address string, toBlock uint64) error {
 			Keys: event.Keys,
 			Data: event.Data,
 		}
-		err := vm.ProcessVaultEvent(event.TransactionHash.String(), address, &coreEvent, event.BlockNumber)
+		err := vm.ProcessVaultEvent(event.TransactionHash.String(), vault.Address, &coreEvent, event.BlockNumber, *event.BlockHash)
 		if err != nil {
 			vm.log.Println("Error processing vault event", err)
 			return err
@@ -161,17 +180,23 @@ func (vm *Manager) CatchupVault(address string, toBlock uint64) error {
 
 // IsVaultAddress checks if an address is a tracked vault
 func (vm *Manager) IsVaultAddress(address string) bool {
-	_, exists := vm.vaultAddressesMap[address]
+	_, exists := vm.vaultRegistryMap[address]
 	return exists
 }
 
 // GetVaultAddresses returns all tracked vault addresses
 func (vm *Manager) GetVaultAddresses() map[string]struct{} {
-	return vm.vaultAddressesMap
+
+	//Hacky faster fix, instead update the usage of this function to avoid translating here
+	addresses := make(map[string]struct{})
+	for _, vault := range vm.vaultRegistryMap {
+		addresses[vault.Address] = struct{}{}
+	}
+	return addresses
 }
 
 // processDeploymentBlockEvents processes events from the deployment block
-func (vm *Manager) processDeploymentBlockEvents(events *rpc.EventChunk, vault models.VaultRegistry) error {
+func (vm *Manager) processDeploymentBlockEvents(events *rpc.EventChunk, vault *models.VaultRegistry) error {
 	eventNameHash := utils.Keccak256("ContractDeployed")
 	for index, event := range events.Events {
 		vm.log.Printf("index: %v", index)
@@ -194,8 +219,10 @@ func (vm *Manager) processDeploymentBlockEvents(events *rpc.EventChunk, vault mo
 				txHash := utils.FeltToHexString(event.TransactionHash.Bytes())
 				eventKeys := utils.FeltArrayToStringArrays(event.Keys)
 				eventData := utils.FeltArrayToStringArrays(event.Data)
+				blockHash := utils.FeltToHexString(event.BlockHash.Bytes())
 
-				vm.db.StoreEvent(txHash, address, event.BlockNumber, "ContractDeployed", eventKeys, eventData)
+				vm.db.StoreEvent(txHash, address, event.BlockNumber, blockHash, "ContractDeployed", eventKeys, eventData)
+				vault.LastBlockIndexed = &blockHash
 				break
 			}
 		}
@@ -214,7 +241,7 @@ func (vm *Manager) processDeploymentBlockEvents(events *rpc.EventChunk, vault mo
 			return err
 		}
 		if utils.FeltToHexString(event.FromAddress.Bytes()) == normalizedVaultAddress {
-			err := vm.ProcessVaultEvent(event.TransactionHash.String(), vault.Address, &junoEvent, event.BlockNumber)
+			err := vm.ProcessVaultEvent(event.TransactionHash.String(), vault.Address, &junoEvent, event.BlockNumber, *event.BlockHash)
 			if err != nil {
 				return err
 			}
@@ -225,7 +252,7 @@ func (vm *Manager) processDeploymentBlockEvents(events *rpc.EventChunk, vault mo
 }
 
 // ProcessVaultEvent processes a vault event
-func (vm *Manager) ProcessVaultEvent(txHash string, vaultAddress string, event *core.Event, blockNumber uint64) error {
+func (vm *Manager) ProcessVaultEvent(txHash string, vaultAddress string, event *core.Event, blockNumber uint64, blockHash felt.Felt) error {
 	// Store the event in the database
 	normalizedVaultAddress, err := utils.NormalizeHexAddress(vaultAddress)
 	if err != nil {
@@ -241,7 +268,8 @@ func (vm *Manager) ProcessVaultEvent(txHash string, vaultAddress string, event *
 
 	// Store the event in the database
 	eventKeys, eventData := utils.EventToStringArrays(*event)
-	if err := vm.db.StoreEvent(txHash, normalizedVaultAddress, blockNumber, eventName, eventKeys, eventData); err != nil {
+	blockHashNormalized := utils.FeltToHexString(blockHash.Bytes())
+	if err := vm.db.StoreEvent(txHash, normalizedVaultAddress, blockNumber, blockHashNormalized, eventName, eventKeys, eventData); err != nil {
 		return err
 	}
 	return nil

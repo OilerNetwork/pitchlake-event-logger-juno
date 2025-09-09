@@ -1,20 +1,23 @@
 
 services:
+  # Local database service (only used if pitchlake-db is not available)
   db:
     image: postgres:16
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-juno_indexer}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-juno_indexer}"]
       interval: 5s
       timeout: 5s
       retries: 5
     ports:
       - "5430:5432"
+    profiles:
+      - local-db
 
   juno_plugin:
     volumes:
@@ -31,13 +34,16 @@ services:
       RPC_URL: ${RPC_URL}
       L1_URL: ${L1_URL}
       CURSOR: ${CURSOR}
-      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      DB_URL: ${DB_URL:-postgres://pitchlake_user:pitchlake_password@pitchlake-db:5432/pitchlake?sslmode=disable}
       DEPLOYER: ${DEPLOYER}
-    depends_on:
-      db:
-        condition: service_healthy
+    networks:
+      - pitchlake-network
     ports:
       - "6060:6060" # Adjust this port if needed
 
 volumes:
   postgres_data:
+
+networks:
+  pitchlake-network:
+    external: true

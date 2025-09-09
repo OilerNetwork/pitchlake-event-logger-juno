@@ -18,6 +18,17 @@ type Network struct {
 	ctx      context.Context
 }
 
+func NewNetwork() (*Network, error) {
+	provider, err := rpc.NewProvider(os.Getenv("RPC_URL"))
+	if err != nil {
+		return nil, err
+	}
+	return &Network{
+		provider: provider,
+		ctx:      context.Background(),
+	}, nil
+}
+
 func (n *Network) GetBlockByHash(hash string) (*rpc.BlockTxHashes, error) {
 	feltString, err := utils.HexStringToFelt(hash)
 	if err != nil {
@@ -34,16 +45,6 @@ func (n *Network) GetBlockByHash(hash string) (*rpc.BlockTxHashes, error) {
 	}
 	return blockTxHashes, nil
 }
-func NewNetwork() (*Network, error) {
-	provider, err := rpc.NewProvider(os.Getenv("RPC_URL"))
-	if err != nil {
-		return nil, err
-	}
-	return &Network{
-		provider: provider,
-		ctx:      context.Background(),
-	}, nil
-}
 
 func (n *Network) GetEvents(fromBlock rpc.BlockID, toBlock rpc.BlockID, address *string) (*rpc.EventChunk, error) {
 	var addressFelt felt.Felt
@@ -54,7 +55,7 @@ func (n *Network) GetEvents(fromBlock rpc.BlockID, toBlock rpc.BlockID, address 
 	if address != nil {
 		addreshHash, err := utils.HexStringToFelt(*address)
 		if err != nil {
-			log.Printf("Error getting felt", err)
+			log.Printf("Error getting felt %f", err)
 			return nil, err
 		}
 		addressFelt = felt.FromBytes(addreshHash)
@@ -70,7 +71,7 @@ func (n *Network) GetEvents(fromBlock rpc.BlockID, toBlock rpc.BlockID, address 
 	}
 	events, err := n.provider.Events(n.ctx, input)
 	if err != nil {
-		log.Printf("Error getting events", err)
+		log.Printf("Error getting events %f", err)
 		return nil, err
 	}
 	return events, nil
@@ -113,7 +114,7 @@ func (n *Network) GetBlocks(fromBlock uint64, toBlock uint64) ([]*models.Starkne
 			blockHeader := blockTxHashes.BlockHeader
 			starknetBlock := &models.StarknetBlocks{
 				BlockNumber: blockNum,
-				BlockHash:   blockHeader.BlockHash.String(),
+				BlockHash:   blockHeader.Hash.String(),
 				ParentHash:  blockHeader.ParentHash.String(),
 				Timestamp:   blockHeader.Timestamp,
 			}

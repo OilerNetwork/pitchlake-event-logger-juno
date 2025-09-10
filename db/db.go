@@ -2,7 +2,7 @@ package db
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"junoplugin/models"
 	"log"
 
@@ -16,7 +16,7 @@ func (db *DB) GetVaultRegistry() ([]*models.VaultRegistry, error) {
 		vault_address, 
 		deployed_at, 
 		last_block_indexed, 
-		last_block_indexed 
+		last_block_processed 
 	FROM vault_registry`
 	rows, err := db.Pool.Query(context.Background(), query)
 	if err != nil {
@@ -29,7 +29,7 @@ func (db *DB) GetVaultRegistry() ([]*models.VaultRegistry, error) {
 
 	for rows.Next() {
 		var vault models.VaultRegistry
-		if err := rows.Scan(&vault.Address, &vault.DeployedAt, &vault.LastBlockIndexed, &vault.LastBlockIndexed); err != nil {
+		if err := rows.Scan(&vault.Address, &vault.DeployedAt, &vault.LastBlockIndexed, &vault.LastBlockProcessed); err != nil {
 			return nil, err
 		}
 		vaultRegistry = append(vaultRegistry, &vault)
@@ -52,7 +52,9 @@ func (db *DB) InsertBlock(block *models.StarknetBlocks) error {
 	status) 
 	VALUES ($1, $2, $3, $4, 'MINED')
 	`
-	_, err := db.tx.Exec(context.Background(), query, block.BlockNumber, hash, parentHash, block.Timestamp)
+	res, err := db.tx.Exec(context.Background(), query, block.BlockNumber, hash, parentHash, block.Timestamp)
+
+	log.Printf("STORAGE RESULT %v %v", res, err)
 	return err
 }
 
@@ -76,7 +78,7 @@ func (db *DB) GetVaultRegistryByAddress(address string) (models.VaultRegistry, e
 	FROM vault_registry 
 	WHERE vault_address = $1`
 
-	err := db.Conn.QueryRow(context.Background(), query, address).Scan(
+	err := db.Pool.QueryRow(context.Background(), query, address).Scan(
 		&vaultRegistry.Address,
 		&vaultRegistry.DeployedAt,
 		&vaultRegistry.LastBlockIndexed,
@@ -90,38 +92,37 @@ func (db *DB) GetNextBlock(hash string) (*models.StarknetBlocks, error) {
 
 	log.Printf("Getting next block: %v", hash)
 	query := `
-	SELECT * FROM starknet_blocks 
+	SELECT block_number, block_hash, parent_hash, timestamp, status FROM starknet_blocks 
 	WHERE parent_hash = $1`
-	row, err := db.Conn.Query(context.Background(), query, hash)
+	err := db.Pool.QueryRow(context.Background(), query, hash).Scan(&block.BlockNumber, &block.BlockHash, &block.ParentHash, &block.Timestamp, &block.Status)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
-	defer row.Close()
-	for row.Next() {
-		err = row.Scan(&block.BlockNumber, &block.BlockHash, &block.ParentHash, &block.Timestamp)
-		if err != nil {
-			return nil, err
-		}
-	}
 	return &block, nil
 }
-func (db *DB) GetBlock(hash string) (models.StarknetBlocks, error) {
+func (db *DB) GetBlock(hash string) (*models.StarknetBlocks, error) {
 	var block models.StarknetBlocks
 	query := `
 	SELECT * FROM starknet_blocks 
 	WHERE block_hash = $1`
-	err := db.tx.QueryRow(context.Background(), query, hash).Scan(&block)
-	return block, err
+	err := db.Pool.QueryRow(context.Background(), query, hash).Scan(&block)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &block, err
 }
 func (db *DB) GetLastIndexedBlockVault(address string) (uint64, error) {
 	var lastBlock uint64
 	query := `
 	SELECT last_block_indexed FROM vault_registry 
 	WHERE vault_address = $1`
-	err := db.tx.QueryRow(context.Background(), query, address).Scan(&lastBlock)
+	err := db.Pool.QueryRow(context.Background(), query, address).Scan(&lastBlock)
 	return lastBlock, err
 }
 func (db *DB) GetLastBlock() (*models.StarknetBlocks, error) {
@@ -140,7 +141,7 @@ func (db *DB) GetLastBlock() (*models.StarknetBlocks, error) {
 			return nil, err
 		}
 	} else {
-		err := db.tx.QueryRow(context.Background(), query).Scan(&lastBlock.BlockNumber, &lastBlock.BlockHash, &lastBlock.ParentHash, &lastBlock.Timestamp)
+		err := db.Pool.QueryRow(context.Background(), query).Scan(&lastBlock.BlockNumber, &lastBlock.BlockHash, &lastBlock.ParentHash, &lastBlock.Timestamp)
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return nil, nil
@@ -151,16 +152,33 @@ func (db *DB) GetLastBlock() (*models.StarknetBlocks, error) {
 	return &lastBlock, nil
 }
 
-func (db *DB) StoreEvent(txHash, vaultAddress string, blockNumber uint64, eventName string, eventKeys []string, eventData []string) error {
+func (db *DB) StoreEvent(txHash, vaultAddress string, blockNumber uint64, blockHash string, eventName string, eventKeys []string, eventData []string) error {
+
+	if db.tx == nil {
+		return errors.New("No transaction found")
+	}
 	log.Printf("Storing event %s %s %d %s %v %v", txHash, vaultAddress, blockNumber, eventName, eventKeys, eventData)
 	query := `    
 	INSERT INTO events 
-	(transaction_hash, vault_address, block_number, event_name, event_keys, event_data, event_count) 
-	VALUES ($1, $2::varchar, $3, $4, $5, $6, 
-		(SELECT COALESCE(MAX(event_count), 0) + 1 
+	(transaction_hash, vault_address, block_number, block_hash, event_name, event_keys, event_data, event_nonce) 
+	VALUES ($1, $2::varchar, $3, $4::varchar, $5, $6, $7,
+		(SELECT COUNT(*) + 1 
 		 FROM events 
 		 WHERE vault_address = $2::varchar))`
-	_, err := db.tx.Exec(context.Background(), query, txHash, vaultAddress, blockNumber, eventName, eventKeys, eventData)
+	_, err := db.tx.Exec(context.Background(), query, txHash, vaultAddress, blockNumber, blockHash, eventName, eventKeys, eventData)
+	if err != nil {
+		log.Printf("WTHELLY")
+		log.Printf("%v", err)
+	}
+	return err
+}
+
+func (db *DB) InsertVault(vault *models.VaultRegistry) error {
+	query := `
+	INSERT INTO vault_registry 
+	(vault_address, deployed_at, last_block_indexed, last_block_processed) 
+	VALUES ($1, $2, $3, $4)`
+	_, err := db.tx.Exec(context.Background(), query, vault.Address, vault.DeployedAt, vault.LastBlockIndexed, vault.LastBlockProcessed)
 	return err
 }
 
@@ -171,17 +189,4 @@ func (db *DB) UpdateVaultRegistry(address string, blockHash string) error {
 	WHERE vault_address = $2`
 	_, err := db.tx.Exec(context.Background(), query, blockHash, address)
 	return err
-}
-func (db *DB) ListenerNewVault(channel chan<- models.VaultRegistry) {
-	db.Conn.Exec(context.Background(), "LISTEN new_vault")
-
-	for {
-		notification, err := db.Conn.WaitForNotification(context.Background())
-		if err != nil {
-			log.Fatal(err)
-		}
-		var vault models.VaultRegistry
-		json.Unmarshal([]byte(notification.Payload), &vault)
-		channel <- vault
-	}
 }

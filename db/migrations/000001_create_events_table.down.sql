@@ -1,2 +1,2 @@
 -- Drop Events table
-DROP TABLE IF EXISTS "Events"; 
+DROP TABLE IF EXISTS "events"; 

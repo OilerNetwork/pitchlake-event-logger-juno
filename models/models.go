@@ -4,6 +4,9 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"math/big"
+
+	"github.com/NethermindEth/juno/core"
+	"github.com/NethermindEth/starknet.go/rpc"
 )
 
 type BigInt struct {
@@ -49,6 +52,27 @@ func (b BigInt) Value() (driver.Value, error) {
 	return b.Int.String(), nil
 }
 
+func CoreToStarknetBlock(block core.Block) StarknetBlocks {
+	starknetBlock := StarknetBlocks{
+		BlockNumber: block.Number,
+		BlockHash:   block.Hash.String(),
+		ParentHash:  block.ParentHash.String(),
+		Timestamp:   block.Timestamp,
+		Status:      "MINED",
+	}
+	return starknetBlock
+}
+
+func RPCBlockToStarknetBlock(rpcBlock *rpc.BlockTxHashes) *StarknetBlocks {
+	return &StarknetBlocks{
+		BlockNumber: rpcBlock.BlockHeader.Number, // Keep the * to dereference
+		BlockHash:   rpcBlock.BlockHeader.Hash.String(),
+		ParentHash:  rpcBlock.BlockHeader.ParentHash.String(),
+		Timestamp:   rpcBlock.BlockHeader.Timestamp,
+		Status:      "MINED",
+	}
+}
+
 type Event struct {
 	ID              uint     `json:"id"`
 	TransactionHash string   `json:"transaction_hash"`
@@ -58,7 +82,7 @@ type Event struct {
 	EventName       string   `json:"event_name"`
 	EventKeys       []string `json:"event_keys"`
 	EventData       []string `json:"event_data"`
-	EventCount      int      `json:"event_count"`
+	EventNonce      int      `json:"event_nonce"`
 }
 
 type StarknetBlocks struct {

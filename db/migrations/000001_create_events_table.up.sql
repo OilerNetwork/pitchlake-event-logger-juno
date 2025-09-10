@@ -2,11 +2,10 @@
 
 CREATE TABLE "events"
 (
-    eventIndex BIGINT NOT NULL,
+    event_nonce BIGINT NOT NULL,
     block_number numeric(78,0) NOT NULL,
     block_hash character varying(66) NOT NULL,
     vault_address character varying(255) NOT NULL,
-    timestamp numeric(78,0) NOT NULL,
     event_name character varying(255) COLLATE pg_catalog."default" NOT NULL,
     event_keys character varying(256)[] NOT NULL,
     event_data character varying(256)[] NOT NULL,

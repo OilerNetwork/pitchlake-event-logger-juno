@@ -7,7 +7,6 @@ import (
 	"junoplugin/network"
 	"junoplugin/plugin/block"
 	"junoplugin/plugin/config"
-	"junoplugin/plugin/events"
 	"junoplugin/plugin/vault"
 	"log"
 
@@ -70,9 +69,6 @@ func NewPluginCore() (*PluginCore, error) {
 		cfg.Cursor,
 	)
 
-	// Wire up vault catchup events
-	eventSender := events.NewVaultCatchupEventSender(blockProcessor.SendVaultCatchupEvent)
-	vaultManager.SetEventSender(eventSender)
 
 	return &PluginCore{
 		config:         cfg,

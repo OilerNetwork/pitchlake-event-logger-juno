@@ -133,20 +133,35 @@ func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 			return err
 		}
 
-		for _, block := range blocks {
-
-			//Should create a seperate version of insert block, the ideal solution is better refactor to be able to use tx more easily
-			bp.db.BeginTx()
+		// Process all blocks in the batch with a single transaction
+		bp.db.BeginTx()
+		var startBlockHash, endBlockHash string
+		
+		for i, block := range blocks {
 			err := bp.db.InsertBlock(block)
 			if err != nil {
 				bp.db.RollbackTx()
 				bp.log.Println("Error inserting block", err)
 				return err
 			}
-			// Send CatchupBlock event for each individual block
-			bp.sendDriverEvent("CatchupBlock", block.BlockHash)
-			bp.db.CommitTx()
+			
+			// Set start and end block hashes for the batch
+			if i == 0 {
+				startBlockHash = block.BlockHash
+			}
+			if i == len(blocks)-1 {
+				endBlockHash = block.BlockHash
+			}
 		}
+		
+		// Send single CatchupBlock event for the entire batch
+		err = bp.db.StoreCatchupBlockEvent(startBlockHash, endBlockHash)
+		if err != nil {
+			bp.log.Printf("Error storing catchup block event: %v", err)
+		} else {
+			bp.log.Printf("Stored and notified catchup block event for blocks %s-%s", startBlockHash, endBlockHash)
+		}
+		bp.db.CommitTx()
 		startBlock = endBlock
 	}
 	return nil

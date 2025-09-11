@@ -21,24 +21,57 @@ AFTER INSERT ON "vault_registry"
 FOR EACH ROW
 EXECUTE FUNCTION notify_insert_registry();
 
--- Driver Events Table for Issue #3 and Issue #6
--- Handles both DriverEvent and VaultCatchupEvent types
+-- Unified driver events table for all notification types
 CREATE TABLE "driver_events"
 (
     "id" SERIAL PRIMARY KEY,
-    "type" VARCHAR(50) NOT NULL,
-    -- DriverEvent fields (NULL for VaultCatchupEvent)
-    "block_number" NUMERIC(78,0),
+    "sequence_index" BIGINT NOT NULL, -- Sequential counter for ordering
+    "type" VARCHAR(50) NOT NULL, -- "StartBlock", "RevertBlock", "CatchupVault"
+    "timestamp" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    "is_processed" BOOLEAN DEFAULT FALSE,
+    
+    -- Basic driver event fields (NULL for CatchupVault)
     "block_hash" VARCHAR(66),
-    -- VaultCatchupEvent fields (NULL for DriverEvent)
+    
+    -- Vault catchup event fields (NULL for basic driver events)
     "vault_address" VARCHAR(66),
-    "start_block" NUMERIC(78,0),
-    "end_block" NUMERIC(78,0),
-    -- Common fields
-    "timestamp" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    "start_block_hash" VARCHAR(66), -- Changed from start_block to start_block_hash
+    "end_block_hash" VARCHAR(66)    -- Changed from end_block to end_block_hash
 );
 
+-- Create sequence for sequential ordering
+CREATE SEQUENCE driver_events_sequence START 1;
+
+-- Indexes for efficient querying
+CREATE INDEX idx_driver_events_sequence ON "driver_events" (sequence_index);
 CREATE INDEX idx_driver_events_type ON "driver_events" (type);
-CREATE INDEX idx_driver_events_block_number ON "driver_events" (block_number);
-CREATE INDEX idx_driver_events_vault_address ON "driver_events" (vault_address);
+CREATE INDEX idx_driver_events_is_processed ON "driver_events" (is_processed);
 CREATE INDEX idx_driver_events_timestamp ON "driver_events" (timestamp);
+CREATE INDEX idx_driver_events_block_hash ON "driver_events" (block_hash);
+CREATE INDEX idx_driver_events_vault_address ON "driver_events" (vault_address);
+
+-- PostgreSQL NOTIFY trigger for unified driver events
+CREATE OR REPLACE FUNCTION notify_driver_event()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_notify('driver_events', 
+        json_build_object(
+            'id', NEW.id,
+            'sequence_index', NEW.sequence_index,
+            'type', NEW.type,
+            'timestamp', NEW.timestamp,
+            'is_processed', NEW.is_processed,
+            'block_hash', NEW.block_hash,
+            'vault_address', NEW.vault_address,
+            'start_block_hash', NEW.start_block_hash,
+            'end_block_hash', NEW.end_block_hash
+        )::text
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER driver_event_notify_trigger
+    AFTER INSERT ON "driver_events"
+    FOR EACH ROW
+    EXECUTE FUNCTION notify_driver_event();

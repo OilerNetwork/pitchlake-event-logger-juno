@@ -190,3 +190,31 @@ func (db *DB) UpdateVaultRegistry(address string, blockHash string) error {
 	_, err := db.tx.Exec(context.Background(), query, blockHash, address)
 	return err
 }
+
+// StoreDriverEvent stores a driver event in the database
+func (db *DB) StoreDriverEvent(eventType string, blockNumber uint64, blockHash string) error {
+	if db.tx == nil {
+		return errors.New("No transaction found")
+	}
+	
+	query := `
+	INSERT INTO driver_events 
+	(type, block_number, block_hash, vault_address, start_block, end_block, timestamp) 
+	VALUES ($1, $2, $3, NULL, NULL, NULL, NOW())`
+	_, err := db.tx.Exec(context.Background(), query, eventType, blockNumber, blockHash)
+	return err
+}
+
+// StoreVaultCatchupEvent stores a vault catchup event in the database
+func (db *DB) StoreVaultCatchupEvent(vaultAddress string, startBlock, endBlock uint64) error {
+	if db.tx == nil {
+		return errors.New("No transaction found")
+	}
+	
+	query := `
+	INSERT INTO driver_events 
+	(type, block_number, block_hash, vault_address, start_block, end_block, timestamp) 
+	VALUES ($1, NULL, NULL, $2, $3, $4, NOW())`
+	_, err := db.tx.Exec(context.Background(), query, "VaultCatchup", vaultAddress, startBlock, endBlock)
+	return err
+}

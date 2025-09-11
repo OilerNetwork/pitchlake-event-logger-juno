@@ -206,6 +206,21 @@ func (db *DB) StoreDriverEvent(eventType string, blockHash string) error {
 	return err
 }
 
+// StoreCatchupBlockEvent stores a catchup block event with start/end block hashes
+func (db *DB) StoreCatchupBlockEvent(startBlockHash, endBlockHash string) error {
+	if db.tx == nil {
+		return errors.New("No transaction found")
+	}
+	
+	// Store event in database with sequence index (triggers NOTIFY automatically)
+	query := `
+	INSERT INTO driver_events 
+	(sequence_index, type, start_block_hash, end_block_hash, timestamp) 
+	VALUES (nextval('driver_events_sequence'), $1, $2, $3, NOW())`
+	_, err := db.tx.Exec(context.Background(), query, "CatchupBlock", startBlockHash, endBlockHash)
+	return err
+}
+
 // StoreVaultCatchupEvent stores a vault catchup event and triggers PostgreSQL NOTIFY
 func (db *DB) StoreVaultCatchupEvent(vaultAddress string, startBlockHash, endBlockHash string) error {
 	if db.tx == nil {
@@ -224,7 +239,7 @@ func (db *DB) StoreVaultCatchupEvent(vaultAddress string, startBlockHash, endBlo
 // GetUnprocessedDriverEvents returns unprocessed driver events for catchup
 func (db *DB) GetUnprocessedDriverEvents(limit int) ([]*models.DriverEvent, error) {
 	query := `
-	SELECT id, sequence_index, type, block_hash, vault_address, start_block_hash, end_block_hash, timestamp, is_processed
+	SELECT id, sequence_index, type, block_hash, start_block_hash, end_block_hash, vault_address, timestamp, is_processed
 	FROM driver_events 
 	WHERE is_processed = FALSE 
 	ORDER BY sequence_index ASC 
@@ -240,9 +255,9 @@ func (db *DB) GetUnprocessedDriverEvents(limit int) ([]*models.DriverEvent, erro
 	for rows.Next() {
 		var event models.DriverEvent
 		var id int
-		var blockHash, vaultAddress, startBlockHash, endBlockHash *string
+		var blockHash, startBlockHash, endBlockHash, vaultAddress *string
 		
-		err := rows.Scan(&id, &event.SequenceIndex, &event.Type, &blockHash, &vaultAddress, &startBlockHash, &endBlockHash, &event.Timestamp, &event.IsProcessed)
+		err := rows.Scan(&id, &event.SequenceIndex, &event.Type, &blockHash, &startBlockHash, &endBlockHash, &vaultAddress, &event.Timestamp, &event.IsProcessed)
 		if err != nil {
 			return nil, err
 		}
@@ -253,14 +268,14 @@ func (db *DB) GetUnprocessedDriverEvents(limit int) ([]*models.DriverEvent, erro
 		if blockHash != nil {
 			event.BlockHash = *blockHash
 		}
-		if vaultAddress != nil {
-			event.VaultAddress = *vaultAddress
-		}
 		if startBlockHash != nil {
 			event.StartBlockHash = *startBlockHash
 		}
 		if endBlockHash != nil {
 			event.EndBlockHash = *endBlockHash
+		}
+		if vaultAddress != nil {
+			event.VaultAddress = *vaultAddress
 		}
 		
 		events = append(events, &event)

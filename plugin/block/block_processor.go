@@ -7,7 +7,6 @@ import (
 	"junoplugin/plugin/vault"
 	"log"
 	"sync"
-	"time"
 
 	"github.com/NethermindEth/juno/core"
 	"github.com/NethermindEth/juno/core/felt"
@@ -23,8 +22,6 @@ type Processor struct {
 	cursor            uint64
 	mu                sync.Mutex
 	log               *log.Logger
-	driverNotificationChan   chan models.DriverEvent
-	vaultCatchupNotificationChan  chan models.VaultCatchupEvent
 }
 
 // NewProcessor creates a new block processor
@@ -42,8 +39,6 @@ func NewProcessor(
 		lastBlockDB:      lastBlockDB,
 		cursor:           cursor,
 		log:              log.Default(),
-		driverNotificationChan:  make(chan models.DriverEvent, 1000), // Buffered notification channel
-		vaultCatchupNotificationChan: make(chan models.VaultCatchupEvent, 1000), // Buffered notification channel
 	}
 }
 
@@ -85,7 +80,7 @@ func (bp *Processor) ProcessNewBlock(
 	bp.lastBlockDB = &starknetBlock
 	
 	// Send StartBlock event right before commit
-	bp.sendDriverEvent("StartBlock", block.Number, block.Hash.String())
+	bp.sendDriverEvent("StartBlock", block.Hash.String())
 	bp.db.CommitTx()
 
 	return nil
@@ -110,7 +105,7 @@ func (bp *Processor) RevertBlock(
 	// This was commented out in the original code
 
 	// Send RevertBlock event right before commit
-	bp.sendDriverEvent("RevertBlock", from.Block.Number, from.Block.Hash.String())
+	bp.sendDriverEvent("RevertBlock", from.Block.Hash.String())
 	bp.db.CommitTx()
 
 	return nil
@@ -149,7 +144,7 @@ func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 				return err
 			}
 			// Send CatchupBlock event for each individual block
-			bp.sendDriverEvent("CatchupBlock", block.BlockNumber, block.BlockHash)
+			bp.sendDriverEvent("CatchupBlock", block.BlockHash)
 			bp.db.CommitTx()
 		}
 		startBlock = endBlock
@@ -187,71 +182,15 @@ func (bp *Processor) processBlockEvents(block *core.Block) error {
 	return nil
 }
 
-// sendDriverEvent sends a driver event through the channel and stores it in the database
-func (bp *Processor) sendDriverEvent(eventType string, blockNumber uint64, blockHash string) {
-	// Store in database for auditing
-	err := bp.db.StoreDriverEvent(eventType, blockNumber, blockHash)
+// sendDriverEvent stores a driver event and triggers PostgreSQL NOTIFY
+func (bp *Processor) sendDriverEvent(eventType string, blockHash string) {
+	// Store event (triggers NOTIFY automatically via database trigger)
+	err := bp.db.StoreDriverEvent(eventType, blockHash)
 	if err != nil {
 		bp.log.Printf("Error storing driver event: %v", err)
-	}
-	
-	// Send through channel
-	event := models.DriverEvent{
-		Type:        eventType,
-		BlockNumber: blockNumber,
-		BlockHash:   blockHash,
-		Timestamp:   time.Now(),
-	}
-	
-	// Wait up to 5 seconds for notification channel space (1000 event buffer)
-	timeout := time.NewTimer(5 * time.Second)
-	defer timeout.Stop()
-	
-	select {
-	case bp.driverNotificationChan <- event:
-		bp.log.Printf("Sent driver notification: %s for block %d", eventType, blockNumber)
-	case <-timeout.C:
-		bp.log.Printf("ERROR: Timeout waiting to send driver notification: %s for block %d - this is a critical failure!", eventType, blockNumber)
-		// Note: Event is still stored in DB, but event-processor won't be notified
+	} else {
+		bp.log.Printf("Stored and notified driver event: %s for block %s", eventType, blockHash)
 	}
 }
 
-// SendVaultCatchupEvent sends a vault catchup event through the channel and stores it in the database
-func (bp *Processor) SendVaultCatchupEvent(vaultAddress string, startBlock, endBlock uint64) {
-	// Store in database for auditing
-	err := bp.db.StoreVaultCatchupEvent(vaultAddress, startBlock, endBlock)
-	if err != nil {
-		bp.log.Printf("Error storing vault catchup event: %v", err)
-	}
-	
-	// Send through channel
-	event := models.VaultCatchupEvent{
-		Type:         "VaultCatchup",
-		VaultAddress: vaultAddress,
-		StartBlock:   startBlock,
-		EndBlock:     endBlock,
-		Timestamp:    time.Now(),
-	}
-	
-	// Wait up to 5 seconds for notification channel space (1000 event buffer)
-	timeout := time.NewTimer(5 * time.Second)
-	defer timeout.Stop()
-	
-	select {
-	case bp.vaultCatchupNotificationChan <- event:
-		bp.log.Printf("Sent vault catchup notification for vault %s, blocks %d-%d", vaultAddress, startBlock, endBlock)
-	case <-timeout.C:
-		bp.log.Printf("ERROR: Timeout waiting to send vault catchup notification for vault %s - this is a critical failure!", vaultAddress)
-		// Note: Event is still stored in DB, but event-processor won't be notified
-	}
-}
 
-// GetDriverNotificationChannel returns the driver notification channel for external listeners
-func (bp *Processor) GetDriverNotificationChannel() <-chan models.DriverEvent {
-	return bp.driverNotificationChan
-}
-
-// GetVaultCatchupNotificationChannel returns the vault catchup notification channel for external listeners
-func (bp *Processor) GetVaultCatchupNotificationChannel() <-chan models.VaultCatchupEvent {
-	return bp.vaultCatchupNotificationChan
-}

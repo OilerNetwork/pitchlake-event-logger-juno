@@ -191,30 +191,87 @@ func (db *DB) UpdateVaultRegistry(address string, blockHash string) error {
 	return err
 }
 
-// StoreDriverEvent stores a driver event in the database
-func (db *DB) StoreDriverEvent(eventType string, blockNumber uint64, blockHash string) error {
+// StoreDriverEvent stores a basic driver event (StartBlock/RevertBlock) and triggers PostgreSQL NOTIFY
+func (db *DB) StoreDriverEvent(eventType string, blockHash string) error {
 	if db.tx == nil {
 		return errors.New("No transaction found")
 	}
 	
+	// Store event in database with sequence index (triggers NOTIFY automatically)
 	query := `
 	INSERT INTO driver_events 
-	(type, block_number, block_hash, vault_address, start_block, end_block, timestamp) 
-	VALUES ($1, $2, $3, NULL, NULL, NULL, NOW())`
-	_, err := db.tx.Exec(context.Background(), query, eventType, blockNumber, blockHash)
+	(sequence_index, type, block_hash, timestamp) 
+	VALUES (nextval('driver_events_sequence'), $1, $2, NOW())`
+	_, err := db.tx.Exec(context.Background(), query, eventType, blockHash)
 	return err
 }
 
-// StoreVaultCatchupEvent stores a vault catchup event in the database
-func (db *DB) StoreVaultCatchupEvent(vaultAddress string, startBlock, endBlock uint64) error {
+// StoreVaultCatchupEvent stores a vault catchup event and triggers PostgreSQL NOTIFY
+func (db *DB) StoreVaultCatchupEvent(vaultAddress string, startBlockHash, endBlockHash string) error {
 	if db.tx == nil {
 		return errors.New("No transaction found")
 	}
 	
+	// Store event in database with sequence index (triggers NOTIFY automatically)
 	query := `
 	INSERT INTO driver_events 
-	(type, block_number, block_hash, vault_address, start_block, end_block, timestamp) 
-	VALUES ($1, NULL, NULL, $2, $3, $4, NOW())`
-	_, err := db.tx.Exec(context.Background(), query, "VaultCatchup", vaultAddress, startBlock, endBlock)
+	(sequence_index, type, vault_address, start_block_hash, end_block_hash, timestamp) 
+	VALUES (nextval('driver_events_sequence'), $1, $2, $3, $4, NOW())`
+	_, err := db.tx.Exec(context.Background(), query, "CatchupVault", vaultAddress, startBlockHash, endBlockHash)
+	return err
+}
+
+// GetUnprocessedDriverEvents returns unprocessed driver events for catchup
+func (db *DB) GetUnprocessedDriverEvents(limit int) ([]*models.DriverEvent, error) {
+	query := `
+	SELECT id, sequence_index, type, block_hash, vault_address, start_block_hash, end_block_hash, timestamp, is_processed
+	FROM driver_events 
+	WHERE is_processed = FALSE 
+	ORDER BY sequence_index ASC 
+	LIMIT $1`
+	
+	rows, err := db.Pool.Query(context.Background(), query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
+	var events []*models.DriverEvent
+	for rows.Next() {
+		var event models.DriverEvent
+		var id int
+		var blockHash, vaultAddress, startBlockHash, endBlockHash *string
+		
+		err := rows.Scan(&id, &event.SequenceIndex, &event.Type, &blockHash, &vaultAddress, &startBlockHash, &endBlockHash, &event.Timestamp, &event.IsProcessed)
+		if err != nil {
+			return nil, err
+		}
+		
+		event.ID = id
+		
+		// Set fields based on event type
+		if blockHash != nil {
+			event.BlockHash = *blockHash
+		}
+		if vaultAddress != nil {
+			event.VaultAddress = *vaultAddress
+		}
+		if startBlockHash != nil {
+			event.StartBlockHash = *startBlockHash
+		}
+		if endBlockHash != nil {
+			event.EndBlockHash = *endBlockHash
+		}
+		
+		events = append(events, &event)
+	}
+	
+	return events, nil
+}
+
+// MarkDriverEventProcessed marks a driver event as processed
+func (db *DB) MarkDriverEventProcessed(id int) error {
+	query := `UPDATE driver_events SET is_processed = TRUE WHERE id = $1`
+	_, err := db.Pool.Exec(context.Background(), query, id)
 	return err
 }

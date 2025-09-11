@@ -30,13 +30,15 @@ CREATE TABLE "driver_events"
     "timestamp" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     "is_processed" BOOLEAN DEFAULT FALSE,
     
-    -- Basic driver event fields (NULL for CatchupVault)
+    -- Basic driver event fields (NULL for CatchupVault and CatchupBlock)
     "block_hash" VARCHAR(66),
     
-    -- Vault catchup event fields (NULL for basic driver events)
-    "vault_address" VARCHAR(66),
-    "start_block_hash" VARCHAR(66), -- Changed from start_block to start_block_hash
-    "end_block_hash" VARCHAR(66)    -- Changed from end_block to end_block_hash
+    -- Block range fields (NULL for basic driver events, used by CatchupBlock and CatchupVault)
+    "start_block_hash" VARCHAR(66),
+    "end_block_hash" VARCHAR(66),
+    
+    -- Vault catchup event fields (NULL for basic driver events and CatchupBlock)
+    "vault_address" VARCHAR(66)
 );
 
 -- Create sequence for sequential ordering
@@ -62,9 +64,9 @@ BEGIN
             'timestamp', NEW.timestamp,
             'is_processed', NEW.is_processed,
             'block_hash', NEW.block_hash,
-            'vault_address', NEW.vault_address,
             'start_block_hash', NEW.start_block_hash,
-            'end_block_hash', NEW.end_block_hash
+            'end_block_hash', NEW.end_block_hash,
+            'vault_address', NEW.vault_address
         )::text
     );
     RETURN NEW;

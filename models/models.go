@@ -102,20 +102,21 @@ type VaultRegistry struct {
 	LastBlockProcessed *string `json:"last_block_processed"`
 }
 
-// DriverEvent represents a driver notification event
+// DriverEvent represents a unified driver notification event
 type DriverEvent struct {
-	Type        string    `json:"type"`        // "StartBlock" or "RevertBlock"
-	BlockNumber uint64    `json:"block_number"`
-	BlockHash   string    `json:"block_hash"`
-	Timestamp   time.Time `json:"timestamp"`
+	ID            int       `json:"id"`            // Database ID
+	SequenceIndex int64     `json:"sequence_index"` // Sequential counter for ordering
+	Type          string    `json:"type"`          // "StartBlock", "RevertBlock", or "CatchupVault"
+	Timestamp     time.Time `json:"timestamp"`
+	IsProcessed   bool      `json:"is_processed"`
+	
+	// Basic driver event fields (NULL for CatchupVault)
+	BlockHash     string    `json:"block_hash,omitempty"`
+	
+	// Vault catchup event fields (NULL for basic driver events)
+	VaultAddress  string    `json:"vault_address,omitempty"`
+	StartBlockHash string   `json:"start_block_hash,omitempty"` // Changed from StartBlock to StartBlockHash
+	EndBlockHash   string   `json:"end_block_hash,omitempty"`   // Changed from EndBlock to EndBlockHash
 }
 
-// VaultCatchupEvent represents a vault-specific catchup event
-type VaultCatchupEvent struct {
-	Type         string    `json:"type"`         // "VaultCatchup"
-	VaultAddress string    `json:"vault_address"`
-	StartBlock   uint64    `json:"start_block"`
-	EndBlock     uint64    `json:"end_block"`
-	Timestamp    time.Time `json:"timestamp"`
-}
 

@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/NethermindEth/juno/core"
 	"github.com/NethermindEth/starknet.go/rpc"
@@ -100,3 +101,21 @@ type VaultRegistry struct {
 	LastBlockIndexed   *string `json:"last_block_indexed"`
 	LastBlockProcessed *string `json:"last_block_processed"`
 }
+
+// DriverEvent represents a driver notification event
+type DriverEvent struct {
+	Type        string    `json:"type"`        // "StartBlock" or "RevertBlock"
+	BlockNumber uint64    `json:"block_number"`
+	BlockHash   string    `json:"block_hash"`
+	Timestamp   time.Time `json:"timestamp"`
+}
+
+// VaultCatchupEvent represents a vault-specific catchup event
+type VaultCatchupEvent struct {
+	Type         string    `json:"type"`         // "VaultCatchup"
+	VaultAddress string    `json:"vault_address"`
+	StartBlock   uint64    `json:"start_block"`
+	EndBlock     uint64    `json:"end_block"`
+	Timestamp    time.Time `json:"timestamp"`
+}
+

@@ -5,6 +5,7 @@ import (
 	"junoplugin/db"
 	"junoplugin/models"
 	"junoplugin/network"
+	"junoplugin/plugin/events"
 	"junoplugin/utils"
 	"log"
 
@@ -20,6 +21,7 @@ type Manager struct {
 	vaultRegistryMap map[string]*models.VaultRegistry
 	udcAddress       string
 	log              *log.Logger
+	eventSender      events.EventSender
 }
 
 // NewManager creates a new vault manager
@@ -30,7 +32,13 @@ func NewManager(db *db.DB, network *network.Network, udcAddress string) *Manager
 		vaultRegistryMap: make(map[string]*models.VaultRegistry),
 		udcAddress:       udcAddress,
 		log:              log.Default(),
+		eventSender:      nil, // Will be set later
 	}
+}
+
+// SetEventSender sets the event sender for vault catchup events
+func (vm *Manager) SetEventSender(sender events.EventSender) {
+	vm.eventSender = sender
 }
 
 // InitializeVaults initializes existing vaults from the database
@@ -227,6 +235,11 @@ func (vm *Manager) CatchupVault(vault models.VaultRegistry, toBlock uint64) erro
 		return err
 	}
 	vm.db.CommitTx()
+
+	// Send vault catchup event after successful catchup
+	if vm.eventSender != nil {
+		vm.eventSender.SendVaultCatchupEvent(vault.Address, *fromBlock.Number, toBlock)
+	}
 
 	return nil
 }

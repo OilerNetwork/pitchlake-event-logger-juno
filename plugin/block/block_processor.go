@@ -23,8 +23,8 @@ type Processor struct {
 	cursor            uint64
 	mu                sync.Mutex
 	log               *log.Logger
-	driverEventChan   chan models.DriverEvent
-	vaultCatchupChan  chan models.VaultCatchupEvent
+	driverNotificationChan   chan models.DriverEvent
+	vaultCatchupNotificationChan  chan models.VaultCatchupEvent
 }
 
 // NewProcessor creates a new block processor
@@ -42,8 +42,8 @@ func NewProcessor(
 		lastBlockDB:      lastBlockDB,
 		cursor:           cursor,
 		log:              log.Default(),
-		driverEventChan:  make(chan models.DriverEvent, 100), // Buffered channel
-		vaultCatchupChan: make(chan models.VaultCatchupEvent, 100), // Buffered channel
+		driverNotificationChan:  make(chan models.DriverEvent, 1000), // Buffered notification channel
+		vaultCatchupNotificationChan: make(chan models.VaultCatchupEvent, 1000), // Buffered notification channel
 	}
 }
 
@@ -203,15 +203,15 @@ func (bp *Processor) sendDriverEvent(eventType string, blockNumber uint64, block
 		Timestamp:   time.Now(),
 	}
 	
-	// Wait up to 5 seconds for channel space
+	// Wait up to 5 seconds for notification channel space (1000 event buffer)
 	timeout := time.NewTimer(5 * time.Second)
 	defer timeout.Stop()
 	
 	select {
-	case bp.driverEventChan <- event:
-		bp.log.Printf("Sent driver event: %s for block %d", eventType, blockNumber)
+	case bp.driverNotificationChan <- event:
+		bp.log.Printf("Sent driver notification: %s for block %d", eventType, blockNumber)
 	case <-timeout.C:
-		bp.log.Printf("ERROR: Timeout waiting to send driver event: %s for block %d - this is a critical failure!", eventType, blockNumber)
+		bp.log.Printf("ERROR: Timeout waiting to send driver notification: %s for block %d - this is a critical failure!", eventType, blockNumber)
 		// Note: Event is still stored in DB, but event-processor won't be notified
 	}
 }
@@ -233,25 +233,25 @@ func (bp *Processor) SendVaultCatchupEvent(vaultAddress string, startBlock, endB
 		Timestamp:    time.Now(),
 	}
 	
-	// Wait up to 5 seconds for channel space
+	// Wait up to 5 seconds for notification channel space (1000 event buffer)
 	timeout := time.NewTimer(5 * time.Second)
 	defer timeout.Stop()
 	
 	select {
-	case bp.vaultCatchupChan <- event:
-		bp.log.Printf("Sent vault catchup event for vault %s, blocks %d-%d", vaultAddress, startBlock, endBlock)
+	case bp.vaultCatchupNotificationChan <- event:
+		bp.log.Printf("Sent vault catchup notification for vault %s, blocks %d-%d", vaultAddress, startBlock, endBlock)
 	case <-timeout.C:
-		bp.log.Printf("ERROR: Timeout waiting to send vault catchup event for vault %s - this is a critical failure!", vaultAddress)
+		bp.log.Printf("ERROR: Timeout waiting to send vault catchup notification for vault %s - this is a critical failure!", vaultAddress)
 		// Note: Event is still stored in DB, but event-processor won't be notified
 	}
 }
 
-// GetDriverEventChannel returns the driver event channel for external listeners
-func (bp *Processor) GetDriverEventChannel() <-chan models.DriverEvent {
-	return bp.driverEventChan
+// GetDriverNotificationChannel returns the driver notification channel for external listeners
+func (bp *Processor) GetDriverNotificationChannel() <-chan models.DriverEvent {
+	return bp.driverNotificationChan
 }
 
-// GetVaultCatchupEventChannel returns the vault catchup event channel for external listeners
-func (bp *Processor) GetVaultCatchupEventChannel() <-chan models.VaultCatchupEvent {
-	return bp.vaultCatchupChan
+// GetVaultCatchupNotificationChannel returns the vault catchup notification channel for external listeners
+func (bp *Processor) GetVaultCatchupNotificationChannel() <-chan models.VaultCatchupEvent {
+	return bp.vaultCatchupNotificationChan
 }

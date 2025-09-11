@@ -5,27 +5,27 @@ import (
 	"log"
 )
 
-// EventListener provides an interface for listening to driver events
+// EventListener provides an interface for listening to driver notifications
 // This is EXAMPLE CODE showing how the event-processor should integrate with the logger
 type EventListener struct {
-	driverEventChan   <-chan models.DriverEvent
-	vaultCatchupChan  <-chan models.VaultCatchupEvent
+	driverNotificationChan   <-chan models.DriverEvent
+	vaultCatchupNotificationChan  <-chan models.VaultCatchupEvent
 	log               *log.Logger
 }
 
 // NewEventListener creates a new event listener
 func NewEventListener(
-	driverEventChan <-chan models.DriverEvent,
-	vaultCatchupChan <-chan models.VaultCatchupEvent,
+	driverNotificationChan <-chan models.DriverEvent,
+	vaultCatchupNotificationChan <-chan models.VaultCatchupEvent,
 ) *EventListener {
 	return &EventListener{
-		driverEventChan:  driverEventChan,
-		vaultCatchupChan: vaultCatchupChan,
+		driverNotificationChan:  driverNotificationChan,
+		vaultCatchupNotificationChan: vaultCatchupNotificationChan,
 		log:              log.Default(),
 	}
 }
 
-// StartListening starts listening for events and calls the provided handlers
+// StartListening starts listening for notifications and calls the provided handlers
 func (el *EventListener) StartListening(
 	driverEventHandler func(models.DriverEvent),
 	vaultCatchupHandler func(models.VaultCatchupEvent),
@@ -33,13 +33,13 @@ func (el *EventListener) StartListening(
 	go func() {
 		for {
 			select {
-			case event := <-el.driverEventChan:
-				el.log.Printf("Received driver event: %s for block %d", event.Type, event.BlockNumber)
+			case event := <-el.driverNotificationChan:
+				el.log.Printf("Received driver notification: %s for block %d", event.Type, event.BlockNumber)
 				if driverEventHandler != nil {
 					driverEventHandler(event)
 				}
-			case event := <-el.vaultCatchupChan:
-				el.log.Printf("Received vault catchup event for vault %s, blocks %d-%d", 
+			case event := <-el.vaultCatchupNotificationChan:
+				el.log.Printf("Received vault catchup notification for vault %s, blocks %d-%d", 
 					event.VaultAddress, event.StartBlock, event.EndBlock)
 				if vaultCatchupHandler != nil {
 					vaultCatchupHandler(event)
@@ -52,12 +52,12 @@ func (el *EventListener) StartListening(
 // Example usage for event-processor:
 /*
 func main() {
-	// Get channels from your block processor
-	driverChan := blockProcessor.GetDriverEventChannel()
-	vaultChan := blockProcessor.GetVaultCatchupEventChannel()
+	// Get notification channels from your block processor
+	driverNotificationChan := blockProcessor.GetDriverNotificationChannel()
+	vaultNotificationChan := blockProcessor.GetVaultCatchupNotificationChannel()
 	
 	// Create event listener
-	listener := events.NewEventListener(driverChan, vaultChan)
+	listener := events.NewEventListener(driverNotificationChan, vaultNotificationChan)
 	
 	// Define your handlers
 	driverHandler := func(event models.DriverEvent) {
@@ -80,7 +80,7 @@ func main() {
 			event.VaultAddress, event.StartBlock, event.EndBlock)
 	}
 	
-	// Start listening
+	// Start listening for notifications
 	listener.StartListening(driverHandler, vaultHandler)
 	
 	// Keep the program running

@@ -15,13 +15,13 @@ import (
 
 // Processor handles block processing logic
 type Processor struct {
-	db           *db.DB
-	network      *network.Network
-	vaultManager *vault.Manager
-	lastBlockDB  *models.StarknetBlocks
-	cursor       uint64
-	mu           sync.Mutex
-	log          *log.Logger
+	db                *db.DB
+	network           *network.Network
+	vaultManager      *vault.Manager
+	lastBlockDB       *models.StarknetBlocks
+	cursor            uint64
+	mu                sync.Mutex
+	log               *log.Logger
 }
 
 // NewProcessor creates a new block processor
@@ -33,12 +33,12 @@ func NewProcessor(
 	cursor uint64,
 ) *Processor {
 	return &Processor{
-		db:           db,
-		network:      network,
-		vaultManager: vaultManager,
-		lastBlockDB:  lastBlockDB,
-		cursor:       cursor,
-		log:          log.Default(),
+		db:               db,
+		network:          network,
+		vaultManager:     vaultManager,
+		lastBlockDB:      lastBlockDB,
+		cursor:           cursor,
+		log:              log.Default(),
 	}
 }
 
@@ -78,6 +78,9 @@ func (bp *Processor) ProcessNewBlock(
 	}
 
 	bp.lastBlockDB = &starknetBlock
+	
+	// Send StartBlock event right before commit
+	bp.sendDriverEvent("StartBlock", block.Hash.String())
 	bp.db.CommitTx()
 
 	return nil
@@ -89,13 +92,21 @@ func (bp *Processor) RevertBlock(
 	to *junoplugin.BlockAndStateUpdate,
 	reverseStateDiff *core.StateDiff,
 ) error {
+	// FIXED: Add proper transaction handling for revert
+	bp.db.BeginTx()
+	
 	err := bp.db.RevertBlock(from.Block.Number, from.Block.Hash.String())
 	if err != nil {
+		bp.db.RollbackTx()
 		return err
 	}
 
 	// TODO: Implement vault event reversion if needed
 	// This was commented out in the original code
+
+	// Send RevertBlock event right before commit
+	bp.sendDriverEvent("RevertBlock", from.Block.Hash.String())
+	bp.db.CommitTx()
 
 	return nil
 }
@@ -122,18 +133,35 @@ func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 			return err
 		}
 
-		for _, block := range blocks {
-
-			//Should create a seperate version of insert block, the ideal solution is better refactor to be able to use tx more easily
-			bp.db.BeginTx()
+		// Process all blocks in the batch with a single transaction
+		bp.db.BeginTx()
+		var startBlockHash, endBlockHash string
+		
+		for i, block := range blocks {
 			err := bp.db.InsertBlock(block)
 			if err != nil {
 				bp.db.RollbackTx()
 				bp.log.Println("Error inserting block", err)
 				return err
 			}
-			bp.db.CommitTx()
+			
+			// Set start and end block hashes for the batch
+			if i == 0 {
+				startBlockHash = block.BlockHash
+			}
+			if i == len(blocks)-1 {
+				endBlockHash = block.BlockHash
+			}
 		}
+		
+		// Send single CatchupBlock event for the entire batch
+		err = bp.db.StoreCatchupBlockEvent(startBlockHash, endBlockHash)
+		if err != nil {
+			bp.log.Printf("Error storing catchup block event: %v", err)
+		} else {
+			bp.log.Printf("Stored and notified catchup block event for blocks %s-%s", startBlockHash, endBlockHash)
+		}
+		bp.db.CommitTx()
 		startBlock = endBlock
 	}
 	return nil
@@ -168,3 +196,16 @@ func (bp *Processor) processBlockEvents(block *core.Block) error {
 
 	return nil
 }
+
+// sendDriverEvent stores a driver event and triggers PostgreSQL NOTIFY
+func (bp *Processor) sendDriverEvent(eventType string, blockHash string) {
+	// Store event (triggers NOTIFY automatically via database trigger)
+	err := bp.db.StoreDriverEvent(eventType, blockHash)
+	if err != nil {
+		bp.log.Printf("Error storing driver event: %v", err)
+	} else {
+		bp.log.Printf("Stored and notified driver event: %s for block %s", eventType, blockHash)
+	}
+}
+
+

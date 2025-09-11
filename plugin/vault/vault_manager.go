@@ -33,6 +33,7 @@ func NewManager(db *db.DB, network *network.Network, udcAddress string) *Manager
 	}
 }
 
+
 // InitializeVaults initializes existing vaults from the database
 func (vm *Manager) LoadVaultsFromRegistry(latestBlock *models.StarknetBlocks) error {
 	vaultRegistry, err := vm.db.GetVaultRegistry()
@@ -227,6 +228,17 @@ func (vm *Manager) CatchupVault(vault models.VaultRegistry, toBlock uint64) erro
 		return err
 	}
 	vm.db.CommitTx()
+
+	// Send vault catchup event after successful catchup
+	startBlockHash := hash // fromBlock hash
+	endBlockHash := nextBlock.BlockHash // toBlock hash
+	
+	err = vm.db.StoreVaultCatchupEvent(vault.Address, startBlockHash, endBlockHash)
+	if err != nil {
+		vm.log.Printf("Error storing vault catchup event: %v", err)
+	} else {
+		vm.log.Printf("Stored and notified vault catchup event for vault %s, blocks %s-%s", vault.Address, startBlockHash, endBlockHash)
+	}
 
 	return nil
 }

@@ -135,9 +135,8 @@ func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 
 		// Process all blocks in the batch with a single transaction
 		bp.db.BeginTx()
-		var startBlockHash, endBlockHash string
 
-		for i, block := range blocks {
+		for _, block := range blocks {
 			err := bp.db.InsertBlock(block)
 			if err != nil {
 				bp.db.RollbackTx()
@@ -145,13 +144,6 @@ func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 				return err
 			}
 
-			// Set start and end block hashes for the batch
-			if i == 0 {
-				startBlockHash = block.BlockHash
-			}
-			if i == len(blocks)-1 {
-				endBlockHash = block.BlockHash
-			}
 		}
 
 		bp.db.CommitTx()

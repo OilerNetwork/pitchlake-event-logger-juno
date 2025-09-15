@@ -235,10 +235,3 @@ func (db *DB) StoreVaultCatchupEvent(vaultAddress string, startBlockHash, endBlo
 	_, err := db.tx.Exec(context.Background(), query, "CatchupVault", vaultAddress, startBlockHash, endBlockHash)
 	return err
 }
-
-// MarkDriverEventProcessed marks a driver event as processed
-func (db *DB) MarkDriverEventProcessed(id int) error {
-	query := `UPDATE driver_events SET is_processed = TRUE WHERE id = $1`
-	_, err := db.Pool.Exec(context.Background(), query, id)
-	return err
-}

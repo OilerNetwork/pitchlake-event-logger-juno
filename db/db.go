@@ -206,21 +206,6 @@ func (db *DB) StoreDriverEvent(eventType string, blockHash string) error {
 	return err
 }
 
-// StoreCatchupBlockEvent stores a catchup block event with start/end block hashes
-func (db *DB) StoreCatchupBlockEvent(startBlockHash, endBlockHash string) error {
-	if db.tx == nil {
-		return errors.New("No transaction found")
-	}
-
-	// Store event in database with sequence index (triggers NOTIFY automatically)
-	query := `
-	INSERT INTO driver_events
-	(sequence_index, type, start_block_hash, end_block_hash, timestamp)
-	VALUES (nextval('driver_events_sequence'), $1, $2, $3, NOW())`
-	_, err := db.tx.Exec(context.Background(), query, "CatchupBlock", startBlockHash, endBlockHash)
-	return err
-}
-
 // StoreVaultCatchupEvent stores a vault catchup event and triggers PostgreSQL NOTIFY
 func (db *DB) StoreVaultCatchupEvent(vaultAddress string, startBlockHash, endBlockHash string) error {
 	if db.tx == nil {

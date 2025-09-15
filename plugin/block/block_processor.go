@@ -21,7 +21,7 @@ type Processor struct {
 	lastBlockDB  *models.StarknetBlocks
 	cursor       uint64
 	mu           sync.Mutex
-	log     *log.Logger
+	log          *log.Logger
 }
 
 // NewProcessor creates a new block processor
@@ -38,7 +38,7 @@ func NewProcessor(
 		vaultManager: vaultManager,
 		lastBlockDB:  lastBlockDB,
 		cursor:       cursor,
-		log:      log.Default(),
+		log:          log.Default(),
 	}
 }
 
@@ -154,13 +154,6 @@ func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 			}
 		}
 
-		// Send single CatchupBlock event for the entire batch
-		err = bp.db.StoreCatchupBlockEvent(startBlockHash, endBlockHash)
-		if err != nil {
-			bp.log.Printf("Error storing catchup block event: %v", err)
-		} else {
-			bp.log.Printf("Stored and notified catchup block event for blocks %s-%s", startBlockHash, endBlockHash)
-		}
 		bp.db.CommitTx()
 		startBlock = endBlock
 	}
@@ -207,4 +200,3 @@ func (bp *Processor) sendDriverEvent(eventType string, blockHash string) {
 		bp.log.Printf("Stored and notified driver event: %s for block %s", eventType, blockHash)
 	}
 }
-

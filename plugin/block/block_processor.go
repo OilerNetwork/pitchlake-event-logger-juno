@@ -15,13 +15,13 @@ import (
 
 // Processor handles block processing logic
 type Processor struct {
-	db                *db.DB
-	network           *network.Network
-	vaultManager      *vault.Manager
-	lastBlockDB       *models.StarknetBlocks
-	cursor            uint64
-	mu                sync.Mutex
-	log               *log.Logger
+	db           *db.DB
+	network      *network.Network
+	vaultManager *vault.Manager
+	lastBlockDB  *models.StarknetBlocks
+	cursor       uint64
+	mu           sync.Mutex
+	log     *log.Logger
 }
 
 // NewProcessor creates a new block processor
@@ -33,12 +33,12 @@ func NewProcessor(
 	cursor uint64,
 ) *Processor {
 	return &Processor{
-		db:               db,
-		network:          network,
-		vaultManager:     vaultManager,
-		lastBlockDB:      lastBlockDB,
-		cursor:           cursor,
-		log:              log.Default(),
+		db:           db,
+		network:      network,
+		vaultManager: vaultManager,
+		lastBlockDB:  lastBlockDB,
+		cursor:       cursor,
+		log:      log.Default(),
 	}
 }
 
@@ -78,7 +78,7 @@ func (bp *Processor) ProcessNewBlock(
 	}
 
 	bp.lastBlockDB = &starknetBlock
-	
+
 	// Send StartBlock event right before commit
 	bp.sendDriverEvent("StartBlock", block.Hash.String())
 	bp.db.CommitTx()
@@ -94,7 +94,7 @@ func (bp *Processor) RevertBlock(
 ) error {
 	// FIXED: Add proper transaction handling for revert
 	bp.db.BeginTx()
-	
+
 	err := bp.db.RevertBlock(from.Block.Number, from.Block.Hash.String())
 	if err != nil {
 		bp.db.RollbackTx()
@@ -113,7 +113,7 @@ func (bp *Processor) RevertBlock(
 
 func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 
-	//Leaving this as a potential usage,  we use this to decide how much block data we wanna back fill (in case of a very edge case of clean starting block getting reorged)
+	//Leaving this as a potential usage,  we use this to decide how much block data we want to back fill (in case of a very edge case of clean starting block getting reorged)
 	backFillIndex := uint64(3)
 	startBlock := latestBlock - uint64(backFillIndex)
 	if bp.lastBlockDB != nil {
@@ -136,7 +136,7 @@ func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 		// Process all blocks in the batch with a single transaction
 		bp.db.BeginTx()
 		var startBlockHash, endBlockHash string
-		
+
 		for i, block := range blocks {
 			err := bp.db.InsertBlock(block)
 			if err != nil {
@@ -144,7 +144,7 @@ func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 				bp.log.Println("Error inserting block", err)
 				return err
 			}
-			
+
 			// Set start and end block hashes for the batch
 			if i == 0 {
 				startBlockHash = block.BlockHash
@@ -153,7 +153,7 @@ func (bp *Processor) CatchupBlocks(latestBlock uint64) error {
 				endBlockHash = block.BlockHash
 			}
 		}
-		
+
 		// Send single CatchupBlock event for the entire batch
 		err = bp.db.StoreCatchupBlockEvent(startBlockHash, endBlockHash)
 		if err != nil {
@@ -207,5 +207,4 @@ func (bp *Processor) sendDriverEvent(eventType string, blockHash string) {
 		bp.log.Printf("Stored and notified driver event: %s for block %s", eventType, blockHash)
 	}
 }
-
 

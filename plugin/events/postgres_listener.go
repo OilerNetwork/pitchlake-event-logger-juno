@@ -82,7 +82,7 @@ func (pl *PostgreSQLListener) handleNotifications(ctx context.Context) {
 
 			// Listen for notifications
 			notification.ExecContext(ctx, "LISTEN driver_events")
-			
+
 			// This is a simplified example - in production you'd use a proper notification listener
 			// like github.com/lib/pq's notification system
 			pl.logger.Println("Waiting for notifications...")
@@ -90,45 +90,3 @@ func (pl *PostgreSQLListener) handleNotifications(ctx context.Context) {
 		}
 	}
 }
-
-// ProcessDriverEvent processes a driver event notification
-func (pl *PostgreSQLListener) ProcessDriverEvent(event DriverEvent) {
-	pl.logger.Printf("Processing driver event: %+v", event)
-
-	switch event.Type {
-	case "StartBlock":
-		pl.logger.Printf("Block %d processed successfully", event.BlockNumber)
-		// Handle new block processed
-	case "RevertBlock":
-		pl.logger.Printf("Block %d was reverted", event.BlockNumber)
-		// Handle block reverted
-	case "CatchupBlock":
-		pl.logger.Printf("Catchup block %d processed successfully", event.BlockNumber)
-		// Handle catchup block processed
-	default:
-		pl.logger.Printf("Unknown driver event type: %s", event.Type)
-	}
-}
-
-// Example usage for event-processor:
-/*
-func main() {
-	// Connect to the same database as the logger
-	connectionString := "postgres://user:password@localhost/dbname?sslmode=disable"
-	
-	listener, err := events.NewPostgreSQLListener(connectionString)
-	if err != nil {
-		log.Fatal("Failed to create listener:", err)
-	}
-	defer listener.db.Close()
-
-	// Start listening for notifications
-	ctx := context.Background()
-	if err := listener.StartListening(ctx); err != nil {
-		log.Fatal("Failed to start listening:", err)
-	}
-
-	// Keep the program running
-	select {}
-}
-*/

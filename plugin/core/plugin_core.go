@@ -69,6 +69,7 @@ func NewPluginCore() (*PluginCore, error) {
 		cfg.Cursor,
 	)
 
+
 	return &PluginCore{
 		config:         cfg,
 		db:             dbClient,

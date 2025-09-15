@@ -226,8 +226,19 @@ func (vm *Manager) CatchupVault(vault models.VaultRegistry, toBlock uint64) erro
 		vm.db.RollbackTx()
 		return err
 	}
+	startBlockHash := hash              // fromBlock hash
+	endBlockHash := nextBlock.BlockHash // toBlock hash
+
+	err = vm.db.StoreVaultCatchupEvent(vault.Address, startBlockHash, endBlockHash)
+	if err != nil {
+		vm.log.Printf("Error storing vault catchup event: %v", err)
+		vm.db.RollbackTx()
+		return err
+	}
 	vm.db.CommitTx()
 
+	// Send vault catchup event after successful catchup
+	vm.log.Printf("Stored and notified vault catchup event for vault %s, blocks %s-%s", vault.Address, startBlockHash, endBlockHash)
 	return nil
 }
 

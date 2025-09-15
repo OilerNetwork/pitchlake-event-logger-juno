@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/NethermindEth/juno/core"
 	"github.com/NethermindEth/starknet.go/rpc"
@@ -100,3 +101,22 @@ type VaultRegistry struct {
 	LastBlockIndexed   *string `json:"last_block_indexed"`
 	LastBlockProcessed *string `json:"last_block_processed"`
 }
+
+// DriverEvent represents a unified driver notification event
+type DriverEvent struct {
+	ID            int       `json:"id"`            // Database ID
+	SequenceIndex int64     `json:"sequence_index"` // Sequential counter for ordering
+	Type          string    `json:"type"`          // "StartBlock", "RevertBlock", or "CatchupVault"
+	Timestamp     time.Time `json:"timestamp"`
+	IsProcessed   bool      `json:"is_processed"`
+	
+	// Basic driver event fields (NULL for CatchupVault)
+	BlockHash     string    `json:"block_hash,omitempty"`
+	
+	// Vault catchup event fields (NULL for basic driver events)
+	VaultAddress  string    `json:"vault_address,omitempty"`
+	StartBlockHash string   `json:"start_block_hash,omitempty"` // Changed from StartBlock to StartBlockHash
+	EndBlockHash   string   `json:"end_block_hash,omitempty"`   // Changed from EndBlock to EndBlockHash
+}
+
+
